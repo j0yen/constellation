@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# constellation mesh — manage the Tailscale mesh for the constellation fleet.
+# Subcommands:
+#   enroll   [--role <laptop|desktop|cloud>] [--headscale <url>] [--dry-run]
+#   names    [--format <table|json|env>]
+#   status   [--quiet] [--json]
+#   acl      [--apply]
+#   help
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPTS_DIR="$SCRIPT_DIR/scripts"
+
+usage() {
+    cat <<'EOF'
+constellation mesh — Tailscale mesh management for the constellation fleet
+
+Usage:
+  constellation-mesh <subcommand> [options]
+
+Subcommands:
+  enroll    Enroll this node into the mesh.
+            Options: --role <laptop|desktop|cloud>
+                     --headscale <url>   (use self-hosted Headscale)
+                     --auth-key <pass-path>
+                     --dry-run
+  names     Print the canonical fleet name map (role → MagicDNS name).
+            Options: --format <table|json|env>  (default: table)
+                     --tailnet <suffix>
+  status    Verify every expected node is present and reachable.
+            Options: --quiet  --json
+            Exit code: 0=fleet complete, 1=incomplete, 2=error
+  acl       Manage the fleet ACL policy.
+            Options: --apply   push acl-policy.hujson to tailscale admin
+            (Without --apply, prints the policy file path.)
+  help      Show this message.
+
+Environment:
+  TAILSCALE_AUTH_KEY      Auth key (overrides secret store lookup)
+  CONSTELLATION_TAILNET   Tailnet suffix for MagicDNS (e.g. tail12345.ts.net)
+  CONSTELLATION_AUTH_KEY_PATH   Path in pass store for the auth key
+EOF
+}
+
+SUBCOMMAND="${1:-help}"
+shift || true
+
+case "$SUBCOMMAND" in
+    enroll)
+        exec bash "$SCRIPTS_DIR/enroll.sh" "$@"
+        ;;
+    names)
+        exec bash "$SCRIPTS_DIR/names.sh" "$@"
+        ;;
+    status)
+        exec bash "$SCRIPTS_DIR/status.sh" "$@"
+        ;;
+    acl)
+        ACL_FILE="$(cd "$SCRIPT_DIR/config" && pwd)/acl-policy.hujson"
+        if [[ "${1:-}" == "--apply" ]]; then
+            if command -v tailscale &>/dev/null; then
+                echo "[constellation-mesh] Pushing ACL policy to tailscale..."
+                tailscale policy set < "$ACL_FILE" \
+                    || { echo "[constellation-mesh] ERROR: tailscale policy set failed." >&2; exit 1; }
+                echo "[constellation-mesh] ACL policy applied."
+            else
+                echo "[constellation-mesh] ERROR: tailscale not found." >&2
+                exit 1
+            fi
+        else
+            echo "$ACL_FILE"
+        fi
+        ;;
+    help|-h|--help)
+        usage
+        ;;
+    *)
+        echo "Unknown subcommand: $SUBCOMMAND" >&2
+        usage >&2
+        exit 1
+        ;;
+esac

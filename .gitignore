@@ -1,0 +1,12 @@
+# Never commit private keys or decrypted auth keys
+*.key
+*.pem
+*.age.dec
+auth-key-*[^.age]
+
+# Node-role override (local machine state)
+mesh/config/node-role
+
+# Build artifacts
+*.o
+*.so

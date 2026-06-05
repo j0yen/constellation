@@ -1,0 +1,64 @@
+// Tailscale ACL policy for the constellation fleet.
+// HuJSON (JSON with comments) — paste into Tailscale admin > Access controls,
+// or feed to `tailscale policy set` (Tailscale CLI ≥ 1.64).
+//
+// Tags:
+//   tag:fleet   — every enrolled constellation node
+//   tag:laptop  — roaming dev machine
+//   tag:desktop — home desktop / GPU node
+//   tag:cloud   — cloud VPS / hub
+//
+// Ports protected:
+//   4222  — NATS leaf (intra-fleet bus)
+//   7422  — NATS hub (cloud-side)
+//   8080  — GPU brain API
+//   22    — SSH (fleet-only; no public access)
+{
+  // Define which users/nodes can apply each tag.
+  "tagOwners": {
+    "tag:fleet":   ["autogroup:owner"],
+    "tag:laptop":  ["autogroup:owner"],
+    "tag:desktop": ["autogroup:owner"],
+    "tag:cloud":   ["autogroup:owner"]
+  },
+
+  "acls": [
+    // Fleet nodes may reach each other's SSH (administration)
+    {
+      "action": "accept",
+      "src":    ["tag:fleet"],
+      "dst":    ["tag:fleet:22"]
+    },
+    // Fleet nodes may reach the NATS leaf on any node
+    {
+      "action": "accept",
+      "src":    ["tag:fleet"],
+      "dst":    ["tag:fleet:4222"]
+    },
+    // Fleet nodes may reach the NATS hub on the cloud node
+    {
+      "action": "accept",
+      "src":    ["tag:fleet"],
+      "dst":    ["tag:cloud:7422"]
+    },
+    // Fleet nodes may reach the GPU brain API on the desktop
+    {
+      "action": "accept",
+      "src":    ["tag:fleet"],
+      "dst":    ["tag:desktop:8080"]
+    },
+    // Cloud node may expose the brain API too (fallback / cloud brain)
+    {
+      "action": "accept",
+      "src":    ["tag:fleet"],
+      "dst":    ["tag:cloud:8080"]
+    }
+    // Default: all other traffic is DENIED.
+    // (Tailscale default-deny; no explicit deny rule needed.)
+  ],
+
+  // Allow fleet nodes to use the cloud node as an exit node.
+  "autoApprovers": {
+    "exitNode": ["tag:cloud"]
+  }
+}
