@@ -2,6 +2,10 @@
 
 Multi-machine fleet coordination for the wintermute ecosystem.
 
+## Recent
+
+- **appearance (2026-06-04):** chezmoi source tree added (`chezmoi/`) — byte-identical i3, alacritty, and i3status configs across all fleet nodes; per-host monitor/battery divergence handled via Go templates. Run `chezmoi init --source ~/wintermute/constellation/chezmoi && chezmoi apply` on any new node.
+
 ## mesh/
 
 Tailscale mesh setup — enrolls every node into one private network with
