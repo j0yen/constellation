@@ -75,7 +75,11 @@ esac
 
 # ── Check tailscale is installed ─────────────────────────────────────────────
 if ! command -v tailscale &>/dev/null; then
-    die "tailscale not found. Install via: https://tailscale.com/download or your package manager."
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "tailscale not found — dry-run mode, continuing without it."
+    else
+        die "tailscale not found. Install via: https://tailscale.com/download or your package manager."
+    fi
 fi
 
 # ── Resolve auth key ─────────────────────────────────────────────────────────
@@ -106,8 +110,15 @@ resolve_auth_key() {
     die "No auth key found. Set TAILSCALE_AUTH_KEY, or store in pass at 'constellation/tailscale/auth-key-${ROLE}', or provide an age-encrypted file at $age_file"
 }
 
-AUTH_KEY="$(resolve_auth_key)"
-[[ -z "$AUTH_KEY" ]] && die "Auth key resolved to empty string."
+if [[ "$DRY_RUN" == "true" && -z "${TAILSCALE_AUTH_KEY:-}" ]]; then
+    # In dry-run mode with no live key, use a placeholder so the rest of
+    # the script can show the full command that would run.
+    AUTH_KEY="<auth-key-from-pass>"
+    log "(dry-run) Using placeholder auth key — no secret store lookup performed."
+else
+    AUTH_KEY="$(resolve_auth_key)"
+    [[ -z "$AUTH_KEY" ]] && die "Auth key resolved to empty string."
+fi
 
 # ── Build tailscale up flags ──────────────────────────────────────────────────
 TAILSCALE_FLAGS="--authkey=$AUTH_KEY"
