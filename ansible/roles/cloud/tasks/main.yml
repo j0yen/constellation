@@ -1,0 +1,285 @@
+---
+# cloud role tasks — provision the always-on Hetzner CAX21 hub node.
+#
+# What this role does:
+#   1. Assert headless (no desktop/voice) + no GPU  → cost guardrail
+#   2. Install + configure NATS server (JetStream domain "hub", leafnode :7422)
+#   3. Create durable JetStream assets (WM_WORK stream, WM_NODES KV)
+#   4. Enroll the node as a Tailscale exit node (tag:cloud)
+#   5. Install ollama + pull qwen2.5:3b as offline-fallback brain
+#   6. Basic nftables firewall (SSH + NATS ports open; default deny)
+#
+# NOTE: The primary latency brain is the Anthropic API, NOT this node's GPU.
+#       See docs/cloud-hub.md §cost-rationale for the economics.
+
+# ---------------------------------------------------------------------------
+# 0. Guardrails
+# ---------------------------------------------------------------------------
+- name: Assert headless cloud node (no desktop/GPU)
+  ansible.builtin.assert:
+    that:
+      - not (voice_node | default(false) | bool)
+      - gpu == "none"
+    fail_msg: >
+      cloud role must be applied to headless nodes only
+      (voice_node: false, gpu: none).
+
+- name: Assert no GPU persistent resource (burst-only is out of this role)
+  ansible.builtin.debug:
+    msg: >
+      GPU assertion: standing footprint = ~€8/mo Hetzner CAX21 + Anthropic API
+      usage.  GPU is burst-only (constellation-dispatch); no persistent GPU is
+      provisioned by this role.
+  when: gpu_burst_only_assertion | default(true) | bool
+
+# ---------------------------------------------------------------------------
+# 1. System packages for the cloud node
+# ---------------------------------------------------------------------------
+- name: Install cloud-node packages
+  community.general.pacman:
+    name: "{{ cloud_packages }}"
+    state: present
+    update_cache: false
+
+# ---------------------------------------------------------------------------
+# 2. NATS server — install binary
+# ---------------------------------------------------------------------------
+- name: Ensure NATS install dir exists
+  ansible.builtin.file:
+    path: "{{ nats_install_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Check NATS binary version
+  ansible.builtin.command: "{{ nats_bin }} --version"
+  register: nats_current_version
+  changed_when: false
+  failed_when: false
+
+- name: Download NATS server binary
+  ansible.builtin.get_url:
+    url: "https://github.com/nats-io/nats-server/releases/download/v{{ nats_version }}/nats-server-v{{ nats_version }}-linux-arm64.tar.gz"
+    dest: "/tmp/nats-server-{{ nats_version }}.tar.gz"
+    mode: "0644"
+    checksum: "{{ 'sha256:' + nats_checksum if nats_checksum else omit }}"
+  when: >
+    nats_current_version.rc != 0 or
+    nats_version not in (nats_current_version.stdout | default(''))
+
+- name: Extract NATS server binary
+  ansible.builtin.unarchive:
+    src: "/tmp/nats-server-{{ nats_version }}.tar.gz"
+    dest: "{{ nats_install_dir }}"
+    remote_src: true
+    extra_opts: ["--strip-components=1"]
+    creates: "{{ nats_bin }}"
+  when: >
+    nats_current_version.rc != 0 or
+    nats_version not in (nats_current_version.stdout | default(''))
+
+- name: Ensure NATS binary is executable
+  ansible.builtin.file:
+    path: "{{ nats_bin }}"
+    mode: "0755"
+    owner: root
+    group: root
+  when: >
+    nats_current_version.rc != 0 or
+    nats_version not in (nats_current_version.stdout | default(''))
+
+# ---------------------------------------------------------------------------
+# 3. NATS system user + directories
+# ---------------------------------------------------------------------------
+- name: Ensure nats system user exists
+  ansible.builtin.user:
+    name: "{{ nats_user }}"
+    group: "{{ nats_group }}"
+    system: true
+    shell: /sbin/nologin
+    create_home: false
+    state: present
+
+- name: Ensure NATS directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ nats_user }}"
+    group: "{{ nats_group }}"
+    mode: "0750"
+  loop:
+    - "{{ nats_config_dir }}"
+    - "{{ nats_data_dir }}"
+    - "{{ nats_creds_dir }}"
+    - /var/log/nats
+
+# ---------------------------------------------------------------------------
+# 4. TLS credentials — self-signed for initial rollout
+#    Production: replace with Let's Encrypt / Vault certs.
+# ---------------------------------------------------------------------------
+- name: Check if hub TLS cert exists
+  ansible.builtin.stat:
+    path: "{{ nats_creds_dir }}/hub-cert.pem"
+  register: hub_cert_stat
+
+- name: Generate self-signed TLS cert + key for NATS hub
+  ansible.builtin.command: >
+    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256
+    -keyout {{ nats_creds_dir }}/hub-key.pem
+    -out {{ nats_creds_dir }}/hub-cert.pem
+    -days 3650 -nodes
+    -subj "/CN={{ tailscale_hostname }}.{{ tailscale_domain | default('tail') }}"
+  when: not hub_cert_stat.stat.exists
+  notify: Restart nats-server
+
+- name: Set ownership on NATS TLS certs
+  ansible.builtin.file:
+    path: "{{ item }}"
+    owner: "{{ nats_user }}"
+    group: "{{ nats_group }}"
+    mode: "0640"
+  loop:
+    - "{{ nats_creds_dir }}/hub-cert.pem"
+    - "{{ nats_creds_dir }}/hub-key.pem"
+  when: not hub_cert_stat.stat.exists
+
+# ---------------------------------------------------------------------------
+# 5. NATS hub configuration
+# ---------------------------------------------------------------------------
+- name: Deploy NATS hub config
+  ansible.builtin.template:
+    src: nats-hub.conf.j2
+    dest: "{{ nats_config_file }}"
+    owner: "{{ nats_user }}"
+    group: "{{ nats_group }}"
+    mode: "0640"
+  notify: Reload nats-server
+
+# ---------------------------------------------------------------------------
+# 6. NATS systemd service
+# ---------------------------------------------------------------------------
+- name: Deploy nats-server systemd service
+  ansible.builtin.template:
+    src: nats-server.service.j2
+    dest: /etc/systemd/system/nats-server.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd daemon
+    - Restart nats-server
+
+- name: Enable and start nats-server
+  ansible.builtin.systemd:
+    name: nats-server
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# ---------------------------------------------------------------------------
+# 7. JetStream assets — WM_WORK stream + WM_NODES KV (idempotent)
+# ---------------------------------------------------------------------------
+- name: Install nats CLI (AUR / binary)
+  community.general.pacman:
+    name: nats-cli
+    state: present
+  ignore_errors: true   # not in official repos; tolerate if missing
+
+- name: Deploy nats-assets script
+  ansible.builtin.template:
+    src: nats-assets.sh.j2
+    dest: /usr/local/bin/nats-assets
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Create JetStream assets (idempotent)
+  ansible.builtin.command: /usr/local/bin/nats-assets
+  register: nats_assets_result
+  changed_when: "'created' in nats_assets_result.stdout"
+  ignore_errors: true   # nats CLI may not be installed yet; logged as warning
+
+- name: Warn if nats-assets failed (nats CLI missing)
+  ansible.builtin.debug:
+    msg: >
+      nats-assets returned non-zero — nats CLI may not be installed.
+      Run /usr/local/bin/nats-assets manually after installing the nats CLI.
+  when: nats_assets_result.rc | default(0) != 0
+
+# ---------------------------------------------------------------------------
+# 8. Tailscale enrollment — tag:cloud, exit node
+# ---------------------------------------------------------------------------
+- name: Retrieve Tailscale auth key from pass
+  ansible.builtin.command: "pass {{ tailscale_authkey_pass_path }}"
+  register: ts_authkey
+  changed_when: false
+  no_log: true
+  delegate_to: localhost
+  become: false
+
+- name: Check current Tailscale status
+  ansible.builtin.command: tailscale status --json
+  register: ts_status
+  changed_when: false
+  failed_when: false
+
+- name: Enroll node with Tailscale (tag:cloud, exit node)
+  ansible.builtin.command: >
+    tailscale up
+    --authkey={{ ts_authkey.stdout | trim }}
+    --hostname={{ tailscale_hostname }}
+    --advertise-tags={{ tailscale_tags }}
+    --advertise-exit-node
+    --accept-routes
+    --ssh
+  when: >
+    ts_status.rc != 0 or
+    'Running' not in (ts_status.stdout | default(''))
+  no_log: true
+
+# ---------------------------------------------------------------------------
+# 9. Offline-fallback brain — ollama + qwen2.5:3b
+#    This is the DEGRADED path; primary brain = Anthropic API (cloud-hosted LLM).
+#    Cost rationale: 200 voice turns/day ≈ $3-11/mo on Haiku 4.5 (prompt-cached).
+#    Self-hosted GPU on a $200+/mo GPU box breaks even only at ~15M tokens/day.
+# ---------------------------------------------------------------------------
+- name: Install ollama
+  ansible.builtin.command: >
+    sh -c "curl -fsSL https://ollama.ai/install.sh | sh"
+  args:
+    creates: /usr/local/bin/ollama
+  when: ollama_install | default(true) | bool
+
+- name: Enable and start ollama service
+  ansible.builtin.systemd:
+    name: "{{ ollama_service }}"
+    enabled: true
+    state: started
+  when: ollama_install | default(true) | bool
+
+- name: Pull fallback brain model
+  ansible.builtin.command: "ollama pull {{ fallback_brain_model }}"
+  register: ollama_pull
+  changed_when: "'success' in ollama_pull.stdout | lower"
+  when:
+    - ollama_install | default(true) | bool
+    - fallback_brain_enabled | default(true) | bool
+
+# ---------------------------------------------------------------------------
+# 10. Firewall — nftables, only required ports open
+# ---------------------------------------------------------------------------
+- name: Deploy nftables cloud ruleset
+  ansible.builtin.template:
+    src: nftables-cloud.nft.j2
+    dest: /etc/nftables.conf
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Reload nftables
+
+- name: Enable and start nftables
+  ansible.builtin.systemd:
+    name: nftables
+    enabled: true
+    state: started

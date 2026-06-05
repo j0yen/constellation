@@ -1,0 +1,88 @@
+---
+# cloud role defaults — headless always-on hub node (Hetzner CAX21 primary).
+
+# ---------------------------------------------------------------------------
+# Node identity
+# ---------------------------------------------------------------------------
+voice_node: false          # headless; no wm-* voice daemons
+gpu: none                  # no GPU on the cloud VPS
+
+# ---------------------------------------------------------------------------
+# Packages added on top of the base role for cloud nodes
+# ---------------------------------------------------------------------------
+cloud_packages:
+  - nftables
+  - openssl
+  - unzip
+  - tar
+
+# ---------------------------------------------------------------------------
+# NATS hub — JetStream domain "hub", leafnode listener on :7422
+# ---------------------------------------------------------------------------
+nats_version: "2.10.18"
+nats_checksum: ""          # set in host_vars to pin a SHA-256; empty = skip verify
+nats_install_dir: /opt/nats
+nats_bin: "{{ nats_install_dir }}/nats-server"
+nats_config_dir: /etc/nats
+nats_config_file: "{{ nats_config_dir }}/hub.conf"
+nats_data_dir: /var/lib/nats/jetstream
+nats_creds_dir: /etc/nats/creds
+nats_user: nats
+nats_group: nats
+
+# Ports
+nats_client_port: 4222     # internal client (fleet-local)
+nats_leaf_port: 7422       # leafnode TLS listener (fleet leaves connect here)
+nats_monitor_port: 8222    # HTTP monitoring (loopback only)
+
+# JetStream domain
+nats_js_domain: hub
+
+# Durable streams/KV created idempotently by the role
+# WM_WORK — work-queue stream for constellation-dispatch
+nats_stream_wm_work:
+  name: WM_WORK
+  subjects: ["wm.work.>"]
+  retention: workqueue
+  storage: file
+  max_bytes: 1073741824    # 1 GiB
+  replicas: 1
+
+# WM_NODES — KV bucket for node heartbeats / presence
+nats_kv_wm_nodes:
+  bucket: WM_NODES
+  ttl: 300                 # seconds; nodes re-publish every 60 s
+  storage: file
+  replicas: 1
+
+# ---------------------------------------------------------------------------
+# Tailscale cloud enrollment
+# ---------------------------------------------------------------------------
+tailscale_tags: "tag:fleet,tag:cloud"
+tailscale_hostname: hub
+tailscale_exit_node: true           # advertise as exit node
+tailscale_authkey_pass_path: "constellation/tailscale/auth-key-cloud"
+tailscale_domain: "tail"            # used in self-signed cert CN
+
+# ---------------------------------------------------------------------------
+# Offline-fallback brain (degraded path only; primary is Anthropic API)
+# ---------------------------------------------------------------------------
+fallback_brain_enabled: true
+ollama_install: true
+fallback_brain_model: "qwen2.5:3b"
+ollama_service: ollama
+
+# ---------------------------------------------------------------------------
+# Firewall — ports open on the cloud host
+# ---------------------------------------------------------------------------
+cloud_open_ports:
+  - { port: 22,   proto: tcp, comment: "SSH" }
+  - { port: 7422, proto: tcp, comment: "NATS leafnode TLS" }
+  - { port: 4222, proto: tcp, comment: "NATS client (tailscale-only)" }
+  - { port: 8080, proto: tcp, comment: "brain API fallback (tailscale-only)" }
+
+# ---------------------------------------------------------------------------
+# Oracle spare (hot standby) — documented in failover.md; not provisioned here.
+# Setting this to true emits a reminder that GPU is burst-only (out of this role).
+# ---------------------------------------------------------------------------
+gpu_burst_only_assertion: true

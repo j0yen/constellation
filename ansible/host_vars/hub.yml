@@ -1,0 +1,34 @@
+---
+# host_vars/hub.yml — Hetzner CAX21 cloud hub (primary always-on node).
+#
+# This node hosts: NATS JetStream hub, Tailscale exit, offline-fallback brain.
+# Primary brain is the Anthropic API (NOT self-hosted GPU).
+
+# ---------------------------------------------------------------------------
+# Identity
+# ---------------------------------------------------------------------------
+tailscale_hostname: hub
+tailscale_tags: "tag:fleet,tag:cloud"
+
+# ---------------------------------------------------------------------------
+# Hardware profile — headless ARM, no GPU
+# ---------------------------------------------------------------------------
+voice_node: false
+gpu: none
+
+# ---------------------------------------------------------------------------
+# NATS — pin checksum after first deploy
+# nats_checksum: "sha256-of-the-binary-tar.gz"
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Anthropic API key — sourced from environment / pass at runtime.
+# The primary brain uses WM_ANTHROPIC_API_KEY; NOT managed by Ansible.
+# Set in the node's environment: pass constellation/anthropic/api-key
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Oracle spare promotion config — see docs/cloud-hub.md §failover
+# oracle_spare_host: oracle-a1.tail       # MagicDNS name of spare
+# oracle_spare_ip: 10.x.x.x
+# ---------------------------------------------------------------------------

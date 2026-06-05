@@ -17,6 +17,10 @@
 [desktop]
 
 [cloud]
+# Primary hub: Hetzner CAX21 — set ansible_host to the real IP after provisioning.
+# hub  ansible_host=<hetzner-ipv4>  ansible_user=jsy
+# Spare (Oracle Always-Free A1) — uncomment after provisioning the spare.
+# hub-spare  ansible_host=<oracle-ipv4>  ansible_user=jsy
 
 [fleet:children]
 laptop

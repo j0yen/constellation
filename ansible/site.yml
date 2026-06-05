@@ -7,8 +7,9 @@
 #
 # Roles applied in order:
 #   base    — pacman config + local wintermute repo + linux-wintermute kernel + base packages
-#   desktop — i3 + terminal + status bar + the authoritative tool list
+#   desktop — i3 + terminal + status bar + the authoritative tool list (skipped on cloud)
 #   voice   — wm-* daemons + wintermute.target (only on voice_node hosts)
+#   cloud   — NATS hub + Tailscale exit + fallback brain (only on [cloud] group hosts)
 
 - name: Provision constellation node
   hosts: all
@@ -17,5 +18,8 @@
   roles:
     - role: base
     - role: desktop
+      when: "'cloud' not in group_names"
     - role: voice
       when: voice_node | default(false) | bool
+    - role: cloud
+      when: "'cloud' in group_names"

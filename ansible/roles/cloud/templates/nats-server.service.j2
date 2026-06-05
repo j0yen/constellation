@@ -1,0 +1,25 @@
+# /etc/systemd/system/nats-server.service — managed by Ansible (cloud role).
+[Unit]
+Description=NATS Server (constellation hub)
+Documentation=https://docs.nats.io
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ nats_user }}
+Group={{ nats_group }}
+ExecStart={{ nats_bin }} -c {{ nats_config_file }}
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+# Hardening
+PrivateTmp=true
+ProtectSystem=full
+NoNewPrivileges=true
+ReadWritePaths={{ nats_data_dir }} /var/log/nats
+
+[Install]
+WantedBy=multi-user.target
