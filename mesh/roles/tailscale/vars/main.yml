@@ -1,0 +1,8 @@
+---
+# Internal vars for the tailscale role — not intended for override.
+
+# Mapping of node role to Tailscale tag set
+tailscale_role_tags:
+  laptop:  ["tag:fleet", "tag:laptop"]
+  desktop: ["tag:fleet", "tag:desktop"]
+  cloud:   ["tag:fleet", "tag:cloud"]

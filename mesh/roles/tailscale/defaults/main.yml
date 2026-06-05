@@ -1,0 +1,22 @@
+---
+# Tailscale role defaults for constellation-mesh
+# Override in group_vars, host_vars, or via -e flags.
+
+# Role tag for this node: laptop, desktop, or cloud
+tailscale_role: "laptop"
+
+# Pass store path for the auth key (use pass(1))
+# Expected value: the auth key string, pre-authorized, single-use or reusable
+tailscale_auth_key_pass_path: "constellation/tailscale/auth-key-{{ tailscale_role }}"
+
+# Tailscale version to install (empty = latest from package manager)
+tailscale_version: ""
+
+# Whether to advertise this node as a Tailscale exit node (cloud/hub only)
+tailscale_advertise_exit_node: false
+
+# Self-hosted Headscale URL (empty = use Tailscale's control plane)
+tailscale_headscale_url: ""
+
+# MagicDNS tailnet suffix (empty = auto-detect from tailscale status)
+tailscale_tailnet_suffix: ""

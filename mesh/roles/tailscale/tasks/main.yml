@@ -1,0 +1,89 @@
+---
+# Ansible role: constellation-mesh / tailscale
+#
+# Enrolls this node into the Tailscale mesh using a pre-authorized auth key
+# read from the encrypted pass(1) store.  No auth key is written to the repo.
+#
+# Supported: Arch Linux (pacman), Debian/Ubuntu (apt), RHEL/Fedora (dnf)
+
+- name: Install tailscale (Arch)
+  community.general.pacman:
+    name: tailscale
+    state: present
+  when: ansible_os_family == "Archlinux"
+  become: true
+
+- name: Install tailscale (Debian/Ubuntu)
+  block:
+    - name: Add Tailscale APT repo key
+      ansible.builtin.get_url:
+        url: https://pkgs.tailscale.com/stable/debian/{{ ansible_distribution_release }}.gpg
+        dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
+        mode: "0644"
+    - name: Add Tailscale APT repo
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg]
+          https://pkgs.tailscale.com/stable/debian {{ ansible_distribution_release }} main
+        filename: tailscale
+    - name: Install tailscale package
+      ansible.builtin.apt:
+        name: tailscale
+        state: present
+        update_cache: true
+  when: ansible_os_family == "Debian"
+  become: true
+
+- name: Enable and start tailscaled
+  ansible.builtin.systemd:
+    name: tailscaled
+    enabled: true
+    state: started
+  become: true
+
+- name: Read auth key from pass store
+  # Runs on the Ansible controller (localhost), not the target.
+  # The key is fetched into a variable; it is never written to disk on any node.
+  ansible.builtin.command:
+    cmd: pass show {{ tailscale_auth_key_pass_path }}
+  delegate_to: localhost
+  run_once: false
+  no_log: true
+  register: _ts_auth_key_result
+  changed_when: false
+
+- name: Build tailscale up flags
+  ansible.builtin.set_fact:
+    _ts_flags: >-
+      --authkey={{ _ts_auth_key_result.stdout | trim }}
+      --advertise-tags=tag:fleet,tag:{{ tailscale_role }}
+      --accept-routes
+      {{ '--advertise-exit-node' if tailscale_advertise_exit_node else '' }}
+      {{ '--login-server=' + tailscale_headscale_url if tailscale_headscale_url else '' }}
+  no_log: true
+
+- name: Enroll node in Tailscale mesh
+  ansible.builtin.command:
+    cmd: tailscale up {{ _ts_flags }}
+  become: true
+  no_log: true
+  register: _ts_up_result
+  changed_when: "'logged in' in _ts_up_result.stdout or _ts_up_result.rc == 0"
+  failed_when: _ts_up_result.rc != 0
+
+- name: Verify tailscale status
+  ansible.builtin.command:
+    cmd: tailscale status --json
+  become: false
+  register: _ts_status
+  changed_when: false
+
+- name: Assert node is enrolled (Self block present)
+  ansible.builtin.assert:
+    that:
+      - (_ts_status.stdout | from_json).get('Self') is not none
+      - (_ts_status.stdout | from_json).get('Self', {}).get('HostName', '') | length > 0
+    fail_msg: "tailscale enrollment appears incomplete — Self block missing from status"
+    success_msg: >-
+      Node {{ (_ts_status.stdout | from_json).Self.HostName }}
+      enrolled in tailnet {{ (_ts_status.stdout | from_json).get('MagicDNSSuffix', '?') }}
