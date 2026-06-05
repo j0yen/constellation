@@ -1,0 +1,81 @@
+# constellation isobuild — packages baked into the live installer environment.
+# Derived from the archiso `releng` package list, trimmed to the installer
+# essentials and augmented with the wintermute base so the ISO can provision a
+# node fully offline-ish (kernel + ansible + git already present).
+#
+# NOTE: this is the LIVE INSTALLER's package set, not the installed node's set.
+# The installed node's full package set is owned by the ansible roles
+# (base/desktop/voice defaults). archinstall + the firstboot hook clone the
+# constellation repo and run the playbook to converge to the full set.
+
+# --- base installer / boot ---
+amd-ucode
+intel-ucode
+b43-fwcutter
+broadcom-wl
+linux-firmware
+mkinitcpio
+mkinitcpio-archiso
+mkinitcpio-nfs-utils
+syslinux
+edk2-shell
+efibootmgr
+grub
+memtest86+
+memtest86+-efi
+
+# --- the wintermute kernel (from local repo) ---
+linux-wintermute
+linux-wintermute-headers
+
+# --- archinstall + provisioning ---
+archinstall
+arch-install-scripts
+ansible
+ansible-core
+git
+openssh
+rsync
+reflector
+pacman-contrib
+
+# --- filesystems / disk ---
+btrfs-progs
+dosfstools
+e2fsprogs
+exfatprogs
+f2fs-tools
+xfsprogs
+gptfdisk
+parted
+cryptsetup
+lvm2
+mdadm
+
+# --- network ---
+networkmanager
+iwd
+wireless-regdb
+wpa_supplicant
+dhcpcd
+dnsmasq
+ethtool
+tailscale
+wget
+curl
+
+# --- shell / tools ---
+bash-completion
+sudo
+vim
+nano
+less
+tmux
+htop
+jq
+age
+pacman-contrib
+
+# --- python (ansible deps) ---
+python
+python-pip

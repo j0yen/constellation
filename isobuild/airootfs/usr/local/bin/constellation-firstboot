@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# constellation-firstboot — run inside the INSTALLED node on first boot
+# (NOT in the live ISO). Clones the constellation repo and runs the ansible
+# playbook against localhost to converge the node to the full wintermute set.
+#
+# archinstall installs this script + a oneshot unit; the unit self-disables
+# after a successful run so it never fires twice.
+#
+# Override via env:
+#   CONSTELLATION_REPO   git URL of the constellation repo (default: GitHub j0yen)
+#   CONSTELLATION_DIR    checkout dir (default: /root/constellation)
+#   CONSTELLATION_HOST   inventory hostname / --limit target (default: $(hostname))
+
+set -euo pipefail
+
+REPO="${CONSTELLATION_REPO:-https://github.com/j0yen/constellation.git}"
+DIR="${CONSTELLATION_DIR:-/root/constellation}"
+HOST="${CONSTELLATION_HOST:-$(hostname)}"
+
+echo "[firstboot] constellation node convergence starting for host: ${HOST}"
+
+if [[ ! -d "${DIR}/.git" ]]; then
+  echo "[firstboot] cloning ${REPO} -> ${DIR}"
+  git clone --depth 1 "${REPO}" "${DIR}"
+else
+  echo "[firstboot] repo present; pulling latest"
+  git -C "${DIR}" pull --ff-only || true
+fi
+
+cd "${DIR}/ansible"
+
+# Install required collections (community.general for pacman module).
+ansible-galaxy collection install -r requirements.yml || true
+
+echo "[firstboot] running site.yml against localhost (--limit ${HOST})"
+ansible-playbook -i inventory/hosts site.yml \
+  --connection local \
+  --limit "${HOST}" \
+  || { echo "[firstboot] playbook failed; leaving unit enabled for retry" >&2; exit 1; }
+
+echo "[firstboot] convergence complete; disabling firstboot unit"
+systemctl disable constellation-firstboot.service || true

@@ -1,0 +1,26 @@
+# ansible-lint config for the constellation provisioning tree.
+#
+# Profile: we target the `min` profile (syntax/parse correctness) as the hard
+# gate. The stylistic rules below are intentionally relaxed:
+#
+#   var-naming[no-role-prefix] — several variables deliberately mirror the names
+#     of the things they configure (wintermute_*, nats_*, tailscale_*, gpu) so
+#     they read the same in group_vars/host_vars; a role-name prefix would make
+#     host_vars less obvious. These are facts about the system, not role-private.
+#   partial-become — the voice role runs user-scoped systemd tasks as the
+#     constellation user via become_user with play-level become: true; the rule's
+#     "become at the same level" demand is noise here.
+#   no-changed-when / ignore-errors — chezmoi apply, tailscale enroll, and the
+#     AUR nats CLI install are inherently convergent/best-effort; their
+#     changed/failed semantics are handled in-task.
+profile: min
+
+skip_list:
+  - var-naming[no-role-prefix]
+  - partial-become
+  - no-changed-when
+  - ignore-errors
+  - yaml[commas]
+
+exclude_paths:
+  - .git/

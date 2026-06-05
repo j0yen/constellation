@@ -1,0 +1,38 @@
+{
+  "_comment": "constellation archinstall answer file. Seeds a node base; the firstboot hook then clones the constellation repo and runs the ansible playbook to converge to the full wintermute set. Edit disk/hostname per node, or pass --config to archinstall interactively.",
+  "version": "2.8.0",
+  "archinstall-language": "English",
+  "keyboard-layout": "us",
+  "mirror-region": { "Worldwide": null },
+  "bootloader": "Systemd-boot",
+  "kernels": ["linux-wintermute"],
+  "hostname": "wintermute-node",
+  "timezone": "UTC",
+  "ntp": true,
+  "swap": true,
+  "packages": [
+    "git",
+    "ansible",
+    "ansible-core",
+    "openssh",
+    "sudo",
+    "tailscale",
+    "python",
+    "python-pip"
+  ],
+  "additional-repositories": [],
+  "custom-commands": [
+    "systemctl enable sshd",
+    "systemctl enable tailscaled"
+  ],
+  "profile_config": {
+    "profile": { "main": "Minimal", "details": [] },
+    "gfx_driver": null,
+    "greeter": null
+  },
+  "audio_config": null,
+  "disk_config": {
+    "_comment": "Override per node. Default: best-effort guided wipe of /dev/sda. Use archinstall --config + --disk_layouts for production.",
+    "config_type": "default_layout"
+  }
+}

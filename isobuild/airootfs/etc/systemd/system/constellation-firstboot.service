@@ -1,0 +1,16 @@
+[Unit]
+Description=Constellation node first-boot convergence (clone repo + run ansible)
+Documentation=https://github.com/j0yen/constellation
+After=network-online.target tailscaled.service
+Wants=network-online.target
+ConditionPathExists=/usr/local/bin/constellation-firstboot
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/constellation-firstboot
+RemainAfterExit=yes
+TimeoutStartSec=0
+# Self-disables on success (see script); failure leaves it enabled to retry.
+
+[Install]
+WantedBy=multi-user.target
