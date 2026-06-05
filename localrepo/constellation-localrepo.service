@@ -1,0 +1,14 @@
+[Unit]
+Description=Constellation local pacman repo (darkhttpd)
+Documentation=file:///home/%u/wintermute/constellation/localrepo/serve-repo.sh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/darkhttpd /srv/constellation/pkgs --port 7878
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
