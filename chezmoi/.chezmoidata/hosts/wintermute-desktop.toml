@@ -1,0 +1,13 @@
+# Per-host data for wintermute-desktop.
+# Keys must match constellation-provision host_vars schema:
+#   gpu, monitors, voice_node, role
+# Cross-referenced by: ansible/host_vars/wintermute-desktop.yml
+
+gpu = "amd"
+voice_node = false
+role = "workstation"
+has_battery = false
+
+# Monitor layout — matches ansible host_vars monitors[] array
+# Format: "name:resolution:primary"
+monitors_raw = "DP-1:2560x1440:true,DP-2:1920x1080:false"

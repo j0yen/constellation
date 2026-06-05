@@ -1,0 +1,68 @@
+# alacritty.toml — constellation appearance layer
+# Managed by chezmoi. DO NOT EDIT ~/.config/alacritty/alacritty.toml directly.
+# Source: constellation/chezmoi/dot_config/alacritty/alacritty.toml.tmpl
+#
+# HOST-INVARIANT: font, size, padding, colors, window geometry are byte-identical.
+# No per-host divergence in this file; included here so chezmoi manages it
+# and any node gets the identical terminal appearance.
+
+[window]
+padding = { x = 12, y = 10 }
+decorations = "none"
+opacity = 0.92
+startup_mode = "Windowed"
+title = "Terminal"
+dynamic_title = true
+
+[scrolling]
+history = 10000
+multiplier = 3
+
+[font]
+normal = { family = "DejaVu Sans Mono", style = "Regular" }
+bold   = { family = "DejaVu Sans Mono", style = "Bold" }
+italic = { family = "DejaVu Sans Mono", style = "Italic" }
+size = 11.0
+
+[colors]
+# Green phosphor theme — identical to i3 color palette
+[colors.primary]
+background = "#000000"
+foreground = "#28FE14"
+
+[colors.cursor]
+text   = "#000000"
+cursor = "#28FE14"
+
+[colors.normal]
+black   = "#000000"
+red     = "#c91b00"
+green   = "#1FC710"
+yellow  = "#c7c400"
+blue    = "#003299"
+magenta = "#8000ff"
+cyan    = "#28FE14"
+white   = "#c0c0c0"
+
+[colors.bright]
+black   = "#3f3f3f"
+red     = "#ff4136"
+green   = "#28FE14"
+yellow  = "#ffdc00"
+blue    = "#0074d9"
+magenta = "#b10dc9"
+cyan    = "#7fdbff"
+white   = "#ffffff"
+
+[cursor]
+style = { shape = "Block", blinking = "On" }
+blink_interval = 750
+
+[keyboard]
+bindings = [
+    { key = "V",        mods = "Control|Shift", action = "Paste"      },
+    { key = "C",        mods = "Control|Shift", action = "Copy"       },
+    { key = "Plus",     mods = "Control",       action = "IncreaseFontSize" },
+    { key = "Minus",    mods = "Control",       action = "DecreaseFontSize" },
+    { key = "Key0",     mods = "Control",       action = "ResetFontSize"    },
+]

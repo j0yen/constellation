@@ -1,0 +1,210 @@
+# i3 config — constellation appearance layer
+# Managed by chezmoi. DO NOT EDIT ~/.config/i3/config directly.
+# Source: constellation/chezmoi/dot_config/i3/config.tmpl
+#
+# HOST-INVARIANT: everything except the "Monitor output assignments" section
+# below is byte-identical across all constellation nodes.
+# Per-host divergence is gated on .monitors_raw / .has_battery template data.
+
+# ---------------------------------------------------------------------------
+# Core
+# ---------------------------------------------------------------------------
+set $mod Mod4
+font pango:monospace 9
+
+# ---------------------------------------------------------------------------
+# Startup — byte-identical on every node
+# ---------------------------------------------------------------------------
+exec --no-startup-id dex --autostart --environment i3
+exec_always --no-startup-id xset s off -dpms s noblank
+exec --no-startup-id nm-applet
+exec --no-startup-id pasystray
+exec --no-startup-id blueman-applet
+exec --no-startup-id dunst
+exec --no-startup-id picom
+exec --no-startup-id autotiling
+exec --no-startup-id xrdb -merge ~/.Xresources
+exec --no-startup-id ~/.fehbg
+
+# YouTube on workspace 10 at startup
+assign [instance="^youtube$"] workspace number 10
+exec --no-startup-id firefox --name=youtube --new-window https://www.youtube.com/
+
+# ---------------------------------------------------------------------------
+# Monitor output assignments — PER-HOST (gated on .monitors_raw)
+# This is the ONLY section that differs between hosts.
+# All other sections below are byte-identical.
+# ---------------------------------------------------------------------------
+{{ $monitors := splitList "," .monitors_raw -}}
+{{ range $i, $m := $monitors -}}
+{{ $parts := splitList ":" $m -}}
+{{ $name := index $parts 0 -}}
+{{ $res  := index $parts 1 -}}
+{{ $pri  := index $parts 2 -}}
+{{ if eq $pri "true" -}}
+output {{ $name }} resolution {{ $res }} position 0,0
+{{ else -}}
+output {{ $name }} resolution {{ $res }}
+{{ end -}}
+{{ end }}
+
+# ---------------------------------------------------------------------------
+# Volume / media keys — byte-identical
+# ---------------------------------------------------------------------------
+set $refresh_i3status killall -SIGUSR1 i3status
+bindsym XF86AudioRaiseVolume exec --no-startup-id ~/.local/bin/volume-osd up      && $refresh_i3status
+bindsym XF86AudioLowerVolume exec --no-startup-id ~/.local/bin/volume-osd down    && $refresh_i3status
+bindsym XF86AudioMute        exec --no-startup-id ~/.local/bin/volume-osd mute    && $refresh_i3status
+bindsym XF86AudioMicMute     exec --no-startup-id ~/.local/bin/volume-osd micmute && $refresh_i3status
+bindsym XF86AudioPlay  exec --no-startup-id playerctl play-pause
+bindsym XF86AudioPause exec --no-startup-id playerctl play-pause
+bindsym XF86AudioNext  exec --no-startup-id playerctl next
+bindsym XF86AudioPrev  exec --no-startup-id playerctl previous
+bindsym XF86AudioStop  exec --no-startup-id playerctl stop
+
+# Brightness keys
+bindsym XF86MonBrightnessUp   exec --no-startup-id ~/.local/bin/brightness-osd up
+bindsym XF86MonBrightnessDown exec --no-startup-id ~/.local/bin/brightness-osd down
+
+# ---------------------------------------------------------------------------
+# Mouse + window behaviour — byte-identical
+# ---------------------------------------------------------------------------
+floating_modifier $mod
+tiling_drag modifier titlebar
+
+# ---------------------------------------------------------------------------
+# Keybindings — byte-identical
+# ---------------------------------------------------------------------------
+bindsym $mod+Return exec i3-sensible-terminal
+bindsym $mod+Shift+q kill
+bindsym $mod+d exec --no-startup-id "rofi -show drun -modi drun,run,window"
+
+# Focus
+bindsym $mod+j focus left
+bindsym $mod+k focus down
+bindsym $mod+l focus up
+bindsym $mod+semicolon focus right
+bindsym $mod+Left  focus left
+bindsym $mod+Down  focus down
+bindsym $mod+Up    focus up
+bindsym $mod+Right focus right
+
+# Move
+bindsym $mod+Shift+j move left
+bindsym $mod+Shift+k move down
+bindsym $mod+Shift+l move up
+bindsym $mod+Shift+semicolon move right
+bindsym $mod+Shift+Left  move left
+bindsym $mod+Shift+Down  move down
+bindsym $mod+Shift+Up    move up
+bindsym $mod+Shift+Right move right
+
+# Layout
+bindsym $mod+h split h
+bindsym $mod+v split v
+bindsym $mod+f fullscreen toggle
+bindsym $mod+s layout stacking
+bindsym $mod+w layout tabbed
+bindsym $mod+e layout toggle split
+bindsym $mod+Shift+space floating toggle
+bindsym $mod+space focus mode_toggle
+bindsym $mod+a focus parent
+
+# ---------------------------------------------------------------------------
+# Workspaces — byte-identical
+# ---------------------------------------------------------------------------
+set $ws1  "1"
+set $ws2  "2"
+set $ws3  "3"
+set $ws4  "4"
+set $ws5  "5"
+set $ws6  "6"
+set $ws7  "7"
+set $ws8  "8"
+set $ws9  "9"
+set $ws10 "10"
+
+bindsym $mod+1 workspace number $ws1
+bindsym $mod+2 workspace number $ws2
+bindsym $mod+3 workspace number $ws3
+bindsym $mod+4 workspace number $ws4
+bindsym $mod+5 workspace number $ws5
+bindsym $mod+6 workspace number $ws6
+bindsym $mod+7 workspace number $ws7
+bindsym $mod+8 workspace number $ws8
+bindsym $mod+9 workspace number $ws9
+bindsym $mod+0 workspace number $ws10
+
+bindsym $mod+Shift+1 move container to workspace number $ws1
+bindsym $mod+Shift+2 move container to workspace number $ws2
+bindsym $mod+Shift+3 move container to workspace number $ws3
+bindsym $mod+Shift+4 move container to workspace number $ws4
+bindsym $mod+Shift+5 move container to workspace number $ws5
+bindsym $mod+Shift+6 move container to workspace number $ws6
+bindsym $mod+Shift+7 move container to workspace number $ws7
+bindsym $mod+Shift+8 move container to workspace number $ws8
+bindsym $mod+Shift+9 move container to workspace number $ws9
+bindsym $mod+Shift+0 move container to workspace number $ws10
+
+# ---------------------------------------------------------------------------
+# i3 management — byte-identical
+# ---------------------------------------------------------------------------
+bindsym $mod+Shift+c reload
+bindsym $mod+Shift+r restart
+bindsym $mod+Shift+e exec "i3-nagbar -t warning -m 'Exit i3? This will end your X session.' -B 'Yes, exit i3' 'i3-msg exit'"
+
+# ---------------------------------------------------------------------------
+# Resize mode — byte-identical
+# ---------------------------------------------------------------------------
+mode "resize" {
+        bindsym j          resize shrink width  10 px or 10 ppt
+        bindsym k          resize grow   height 10 px or 10 ppt
+        bindsym l          resize shrink height 10 px or 10 ppt
+        bindsym semicolon  resize grow   width  10 px or 10 ppt
+        bindsym Left       resize shrink width  10 px or 10 ppt
+        bindsym Down       resize grow   height 10 px or 10 ppt
+        bindsym Up         resize shrink height 10 px or 10 ppt
+        bindsym Right      resize grow   width  10 px or 10 ppt
+        bindsym Return mode "default"
+        bindsym Escape mode "default"
+        bindsym $mod+r mode "default"
+}
+bindsym $mod+r mode "resize"
+
+# ---------------------------------------------------------------------------
+# Gaps + borders — byte-identical
+# ---------------------------------------------------------------------------
+gaps inner 16
+gaps outer 8
+smart_gaps on
+smart_borders on
+default_border pixel 2
+
+# ---------------------------------------------------------------------------
+# Theme — green phosphor — byte-identical
+# ---------------------------------------------------------------------------
+# class                 border  bground text    indicator child_border
+client.focused          #1FC710 #1FC710 #000000 #1FC710   #1FC710
+client.focused_inactive #003200 #003200 #28FE14 #003200   #003200
+client.unfocused        #001a00 #001a00 #28FE14 #001a00   #001a00
+client.urgent           #c91b00 #c91b00 #ffffff #c91b00   #c91b00
+client.placeholder      #000000 #000000 #28FE14 #000000   #000000
+client.background       #000000
+
+# ---------------------------------------------------------------------------
+# Bar — byte-identical structure; battery block gated per-host
+# ---------------------------------------------------------------------------
+bar {
+        status_command i3status
+        font pango:monospace 8
+        colors {
+                background         #000000
+                statusline         #28FE14
+                separator          #1a4d1a
+                focused_workspace  #28FE14 #28FE14 #000000
+                active_workspace   #003200 #003200 #28FE14
+                inactive_workspace #000000 #000000 #28FE14
+                urgent_workspace   #c91b00 #c91b00 #ffffff
+                binding_mode       #c7c400 #c7c400 #000000
+        }
+}

@@ -90,3 +90,23 @@
     name: greetd
     enabled: true
     daemon_reload: true
+
+# ---------------------------------------------------------------------------
+# 4. Apply chezmoi appearance source tree (constellation-appearance)
+# ---------------------------------------------------------------------------
+- name: Install chezmoi
+  community.general.pacman:
+    name: chezmoi
+    state: present
+
+- name: Apply constellation appearance via chezmoi
+  ansible.builtin.shell: |
+    chezmoi init --source {{ constellation_chezmoi_source }} --no-tty
+    chezmoi apply --no-tty
+  args:
+    executable: /bin/bash
+  become: true
+  become_user: "{{ constellation_user }}"
+  environment:
+    HOME: "/home/{{ constellation_user }}"
+    CHEZMOI_HOST_DATA: "{{ constellation_chezmoi_source }}/.chezmoidata/hosts/{{ inventory_hostname }}.toml"

@@ -36,3 +36,10 @@ voice_node: false
 # Values: amd | intel | none
 # ---------------------------------------------------------------------------
 gpu: intel
+
+# ---------------------------------------------------------------------------
+# Appearance (constellation-appearance) — chezmoi source tree
+# ---------------------------------------------------------------------------
+# Path to the chezmoi source tree on the control machine / managed node.
+# On a fresh provision this repo is cloned first; chezmoi then applies it.
+constellation_chezmoi_source: "{{ constellation_user_home }}/wintermute/constellation/chezmoi"

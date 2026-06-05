@@ -1,0 +1,28 @@
+# chezmoi.toml.tmpl — per-host configuration for constellation appearance.
+# Rendered once per host on first `chezmoi init` or `chezmoi apply`.
+# The resulting chezmoi.toml is NOT stored in the source tree.
+#
+# Extend by adding new keys to this template AND updating host data files under
+# .chezmoidata/hosts/<hostname>.toml. The schema must match constellation-provision
+# host_vars (gpu, monitors, voice_node, role).
+
+[data]
+  hostname = {{ .chezmoi.hostname | quote }}
+
+  # GPU family — drives xrandr / compositor settings
+  gpu = {{ get .chezmoi.config.data "gpu" | default "intel" | quote }}
+
+  # Is this node the designated voice/STT node?
+  voice_node = {{ get .chezmoi.config.data "voice_node" | default false }}
+
+  # Fleet role: workstation | compute | hub
+  role = {{ get .chezmoi.config.data "role" | default "workstation" | quote }}
+
+  # Monitor list — each entry has name, primary, resolution.
+  # Used to generate i3 output/workspace assignment stanzas.
+  # Format: "name:resolution:primary" (comma-separated list)
+  # e.g. "eDP-1:1920x1200:true" or "DP-1:2560x1440:true,DP-2:1920x1080:false"
+  monitors_raw = {{ get .chezmoi.config.data "monitors_raw" | default "eDP-1:1920x1200:true" | quote }}
+
+  # Battery block: show in i3status only on nodes with a battery
+  has_battery = {{ get .chezmoi.config.data "has_battery" | default false }}
