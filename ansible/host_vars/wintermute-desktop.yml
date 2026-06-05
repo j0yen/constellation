@@ -1,0 +1,13 @@
+---
+# host_vars/wintermute-desktop.yml — Radeon desktop node (compute-only by default).
+
+gpu: amd
+voice_node: false
+
+monitors:
+  - name: DP-1
+    primary: true
+    resolution: "2560x1440"
+  - name: DP-2
+    primary: false
+    resolution: "1920x1080"

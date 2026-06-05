@@ -1,0 +1,24 @@
+# constellation fleet inventory
+# Add each node here; per-host vars live in host_vars/<hostname>.yml
+#
+# Example:
+#   [laptop]
+#   wintermute-laptop  ansible_host=192.168.1.10  ansible_user=jsy
+#
+#   [desktop]
+#   wintermute-desktop ansible_host=192.168.1.11  ansible_user=jsy
+#
+#   [cloud]
+#   wintermute-cloud   ansible_host=10.0.0.1       ansible_user=jsy
+
+[laptop]
+# wintermute-laptop  ansible_host=127.0.0.1  ansible_user=jsy  ansible_connection=local
+
+[desktop]
+
+[cloud]
+
+[fleet:children]
+laptop
+desktop
+cloud

@@ -1,0 +1,4 @@
+---
+- name: Refresh pacman database
+  community.general.pacman:
+    update_cache: true

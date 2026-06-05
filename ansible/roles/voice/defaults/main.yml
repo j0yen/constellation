@@ -1,0 +1,17 @@
+---
+# voice role defaults — only applied when voice_node: true.
+
+# Path to wintermute systemd user units (installed by wintermute-bootstrap)
+wintermute_units_dir: "{{ constellation_user_home }}/.config/systemd/user"
+
+# wm-* daemon binaries expected under this prefix
+wintermute_bin_prefix: "{{ constellation_user_home }}/.local/bin"
+
+# Daemons that join wintermute.target (must all be present before voice is live)
+wintermute_daemons:
+  - agorabus
+  - wm-audio
+  - wm-stt
+
+# agorabus unit name
+agorabus_unit: agorabus.service

@@ -1,0 +1,92 @@
+---
+# desktop role tasks — installs i3, terminal, status bar, and the authoritative
+# tool list. Safe to re-run; pacman state: present is idempotent.
+
+# ---------------------------------------------------------------------------
+# 1. Install desktop packages (single authoritative list)
+# ---------------------------------------------------------------------------
+- name: Install desktop packages
+  community.general.pacman:
+    name: "{{ desktop_packages + desktop_extra_packages }}"
+    state: present
+
+# ---------------------------------------------------------------------------
+# 2. Configure greetd for autologin into i3
+# ---------------------------------------------------------------------------
+- name: Ensure greetd config directory exists
+  ansible.builtin.file:
+    path: /etc/greetd
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Configure greetd autologin into i3
+  ansible.builtin.copy:
+    dest: /etc/greetd/config.toml
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [terminal]
+      vt = 1
+
+      [default_session]
+      command = "tuigreet --time --remember --cmd i3"
+      user = "greeter"
+
+      [initial_session]
+      command = "/usr/local/bin/constellation-start-session"
+      user = "{{ constellation_user }}"
+
+- name: Install constellation session start wrapper
+  ansible.builtin.copy:
+    dest: /usr/local/bin/constellation-start-session
+    owner: root
+    group: root
+    mode: "0755"
+    content: |
+      #!/bin/bash
+      # constellation-start-session: launched by greetd initial_session.
+      # Sets up XDG environment and starts i3 via xinit.
+      export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+      export XDG_SESSION_TYPE=x11
+      exec /usr/bin/xinit /usr/local/bin/constellation-xinitrc -- :0 vt1
+
+- name: Install constellation xinitrc (i3 + graphical-session bridge)
+  ansible.builtin.copy:
+    dest: /usr/local/bin/constellation-xinitrc
+    owner: root
+    group: root
+    mode: "0755"
+    content: |
+      #!/bin/bash
+      # constellation-xinitrc: starts i3 and wires graphical-session.target.
+      #
+      # FOOTGUN (i3 issue #5186): i3 does NOT activate graphical-session.target
+      # by default. Without the bridge below, WantedBy=graphical-session.target
+      # user units never start — including wintermute.target.
+      #
+      # Fix: import DISPLAY/XAUTHORITY into the user systemd env, then start
+      # graphical-session.target, THEN exec i3.
+
+      export DISPLAY="${DISPLAY:-:0}"
+      export XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"
+
+      # Pass display env into user systemd manager
+      systemctl --user import-environment DISPLAY XAUTHORITY DBUS_SESSION_BUS_ADDRESS
+
+      # Activate graphical-session.target so all WantedBy units start
+      systemctl --user start graphical-session.target
+
+      # Launch i3 (takes over this process)
+      exec /usr/bin/i3
+
+# ---------------------------------------------------------------------------
+# 3. Enable greetd
+# ---------------------------------------------------------------------------
+- name: Enable greetd display manager
+  ansible.builtin.systemd:
+    name: greetd
+    enabled: true
+    daemon_reload: true

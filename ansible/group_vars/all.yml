@@ -1,0 +1,38 @@
+---
+# group_vars/all.yml — defaults shared by every constellation node.
+# Per-host overrides live in host_vars/<hostname>.yml.
+
+# ---------------------------------------------------------------------------
+# Identity
+# ---------------------------------------------------------------------------
+constellation_user: jsy
+constellation_user_home: "/home/{{ constellation_user }}"
+
+# ---------------------------------------------------------------------------
+# Local pacman repo (serves the prebuilt linux-wintermute kernel package)
+# Set to a file:// URL or an http:// URL when a node serves it over the mesh.
+# ---------------------------------------------------------------------------
+localrepo_url: "file:///srv/constellation/pkgs"
+localrepo_name: wintermute-local
+localrepo_siglevel: "Optional TrustAll"
+
+# Pinned Arch Linux Archive date — set to "current" to use live mirrors.
+# Change to a date (e.g. "2026/06/01") to freeze all nodes to the same snapshot.
+arch_archive_date: "current"
+
+# ---------------------------------------------------------------------------
+# Kernel
+# ---------------------------------------------------------------------------
+kernel_package: linux-wintermute
+kernel_headers_package: linux-wintermute-headers
+
+# ---------------------------------------------------------------------------
+# Voice stack toggle (per-host override in host_vars)
+# ---------------------------------------------------------------------------
+voice_node: false
+
+# ---------------------------------------------------------------------------
+# GPU type (per-host override; affects driver/Vulkan packages in base role)
+# Values: amd | intel | none
+# ---------------------------------------------------------------------------
+gpu: intel

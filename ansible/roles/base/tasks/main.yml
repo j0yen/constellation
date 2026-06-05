@@ -1,0 +1,100 @@
+---
+# base role tasks — idempotent; safe to re-run on a converged host.
+
+# ---------------------------------------------------------------------------
+# 1. Arch Linux Archive mirror (optional pinned date)
+# ---------------------------------------------------------------------------
+- name: Configure Arch Linux Archive mirror if date is pinned
+  ansible.builtin.template:
+    src: mirrorlist.j2
+    dest: /etc/pacman.d/mirrorlist
+    owner: root
+    group: root
+    mode: "0644"
+  when: arch_archive_date != "current"
+
+# ---------------------------------------------------------------------------
+# 2. Add local wintermute pacman repo to pacman.conf
+#    This repo serves the prebuilt linux-wintermute kernel — no per-host rebuild.
+# ---------------------------------------------------------------------------
+- name: Ensure local wintermute repo section is in pacman.conf
+  ansible.builtin.blockinfile:
+    path: /etc/pacman.conf
+    marker: "# {mark} constellation-localrepo"
+    block: |
+      [{{ localrepo_name }}]
+      SigLevel = {{ localrepo_siglevel }}
+      Server = {{ localrepo_url }}/$arch
+  notify: Refresh pacman database
+
+- name: Flush handlers (refresh pacman db after repo config change)
+  ansible.builtin.meta: flush_handlers
+
+# ---------------------------------------------------------------------------
+# 3. Install base packages
+# ---------------------------------------------------------------------------
+- name: Install base packages
+  community.general.pacman:
+    name: "{{ base_packages }}"
+    state: present
+    update_cache: false   # cache refreshed by handler above
+
+# ---------------------------------------------------------------------------
+# 4. Install GPU-specific packages
+# ---------------------------------------------------------------------------
+- name: Install AMD GPU packages
+  community.general.pacman:
+    name: "{{ gpu_packages_amd }}"
+    state: present
+  when: gpu == "amd"
+
+- name: Install Intel GPU packages
+  community.general.pacman:
+    name: "{{ gpu_packages_intel }}"
+    state: present
+  when: gpu == "intel"
+
+# ---------------------------------------------------------------------------
+# 5. Install linux-wintermute kernel from local repo
+#    Never rebuilt per-host — pulled from the prebuilt localrepo.
+# ---------------------------------------------------------------------------
+- name: Install linux-wintermute kernel
+  community.general.pacman:
+    name:
+      - "{{ kernel_package }}"
+      - "{{ kernel_headers_package }}"
+    state: present
+
+# ---------------------------------------------------------------------------
+# 6. Ensure constellation user exists with correct groups
+# ---------------------------------------------------------------------------
+- name: Ensure constellation user exists
+  ansible.builtin.user:
+    name: "{{ constellation_user }}"
+    groups: "{{ user_groups }}"
+    append: true
+    shell: /bin/bash
+    create_home: true
+    state: present
+
+# ---------------------------------------------------------------------------
+# 7. Sudo: wheel group gets passwordless sudo
+# ---------------------------------------------------------------------------
+- name: Allow wheel group to use sudo without password
+  ansible.builtin.copy:
+    content: "%wheel ALL=(ALL:ALL) NOPASSWD: ALL\n"
+    dest: /etc/sudoers.d/10-wheel-nopasswd
+    owner: root
+    group: root
+    mode: "0440"
+    validate: "visudo -cf %s"
+
+# ---------------------------------------------------------------------------
+# 8. Enable and start tailscaled
+# ---------------------------------------------------------------------------
+- name: Enable and start tailscaled
+  ansible.builtin.systemd:
+    name: tailscaled
+    enabled: true
+    state: started
+    daemon_reload: true

@@ -1,0 +1,89 @@
+---
+# voice role tasks — wires wintermute.target + wm-* daemons.
+# Only applied when voice_node: true (enforced by the when: clause in site.yml).
+#
+# Pre-condition: wintermute-bootstrap must have already installed the wm-*
+# binaries and unit files (this role enables/wires them; it does NOT install them).
+
+# ---------------------------------------------------------------------------
+# 1. Verify wm-* binaries are present
+# ---------------------------------------------------------------------------
+- name: Check that wintermute daemon binaries are installed
+  ansible.builtin.stat:
+    path: "{{ wintermute_bin_prefix }}/{{ item }}"
+  register: bin_stat
+  loop: "{{ wintermute_daemons }}"
+
+- name: Fail if any daemon binary is missing
+  ansible.builtin.fail:
+    msg: >
+      Daemon binary '{{ item.item }}' not found at
+      {{ wintermute_bin_prefix }}/{{ item.item }}.
+      Run wintermute-bootstrap first.
+  when: not item.stat.exists
+  loop: "{{ bin_stat.results }}"
+
+# ---------------------------------------------------------------------------
+# 2. Ensure wintermute.target user unit exists
+# ---------------------------------------------------------------------------
+- name: Ensure wintermute systemd user units directory exists
+  ansible.builtin.file:
+    path: "{{ wintermute_units_dir }}"
+    state: directory
+    owner: "{{ constellation_user }}"
+    group: "{{ constellation_user }}"
+    mode: "0755"
+  become_user: "{{ constellation_user }}"
+
+- name: Install wintermute.target user unit
+  ansible.builtin.copy:
+    dest: "{{ wintermute_units_dir }}/wintermute.target"
+    owner: "{{ constellation_user }}"
+    group: "{{ constellation_user }}"
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Wintermute voice + AI stack
+      PartOf=graphical-session.target
+      After=graphical-session.target
+
+      [Install]
+      WantedBy=graphical-session.target
+  become_user: "{{ constellation_user }}"
+  notify: Reload user systemd daemon
+
+# ---------------------------------------------------------------------------
+# 3. Enable wintermute.target and verify units are enabled
+# ---------------------------------------------------------------------------
+- name: Flush handlers before enabling units
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable wintermute.target for the constellation user
+  ansible.builtin.systemd:
+    name: wintermute.target
+    enabled: true
+    scope: user
+  become_user: "{{ constellation_user }}"
+
+- name: Enable agorabus.service for the constellation user
+  ansible.builtin.systemd:
+    name: "{{ agorabus_unit }}"
+    enabled: true
+    scope: user
+  become_user: "{{ constellation_user }}"
+
+# ---------------------------------------------------------------------------
+# 4. Verify graphical-session.target bridge is in place
+#    (installed by the desktop role's constellation-xinitrc)
+# ---------------------------------------------------------------------------
+- name: Verify graphical-session bridge script exists
+  ansible.builtin.stat:
+    path: /usr/local/bin/constellation-xinitrc
+  register: bridge_stat
+
+- name: Fail if i3 graphical-session bridge is missing
+  ansible.builtin.fail:
+    msg: >
+      /usr/local/bin/constellation-xinitrc is missing.
+      The desktop role must run before the voice role.
+  when: not bridge_stat.stat.exists

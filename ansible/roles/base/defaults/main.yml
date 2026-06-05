@@ -1,0 +1,54 @@
+---
+# base role defaults — overridable in group_vars/host_vars.
+
+# Base packages installed on every node.
+base_packages:
+  - base
+  - base-devel
+  - git
+  - curl
+  - wget
+  - rsync
+  - openssh
+  - sudo
+  - vim
+  - htop
+  - tmux
+  - jq
+  - age
+  - pass
+  - tailscale
+  - python
+  - python-pip
+  - reflector
+  - pacman-contrib
+
+# GPU-specific packages
+gpu_packages_amd:
+  - mesa
+  - vulkan-radeon
+  - lib32-vulkan-radeon
+  - libva-mesa-driver
+  - mesa-vdpau
+  - xf86-video-amdgpu
+  - rocm-opencl-runtime
+
+gpu_packages_intel:
+  - mesa
+  - vulkan-intel
+  - lib32-vulkan-intel
+  - intel-media-driver
+  - libva-intel-driver
+  - xf86-video-intel
+
+# Groups the constellation user belongs to
+user_groups:
+  - wheel
+  - render
+  - video
+  - audio
+  - input
+  - memlog   # wintermute kernel group for memlog cgroup
+
+# Bootloader (grub or systemd-boot)
+bootloader: systemd-boot

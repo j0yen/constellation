@@ -1,0 +1,21 @@
+---
+# constellation site playbook — provision any machine into an identical wintermute node.
+# Usage:
+#   ansible-playbook -i inventory/hosts site.yml
+#   ansible-playbook -i inventory/hosts site.yml --check   # dry-run
+#   ansible-playbook -i inventory/hosts site.yml --limit laptop
+#
+# Roles applied in order:
+#   base    — pacman config + local wintermute repo + linux-wintermute kernel + base packages
+#   desktop — i3 + terminal + status bar + the authoritative tool list
+#   voice   — wm-* daemons + wintermute.target (only on voice_node hosts)
+
+- name: Provision constellation node
+  hosts: all
+  become: true
+  gather_facts: true
+  roles:
+    - role: base
+    - role: desktop
+    - role: voice
+      when: voice_node | default(false) | bool

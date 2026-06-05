@@ -1,0 +1,6 @@
+---
+# Ansible Galaxy collections required by constellation playbooks.
+# Install with: ansible-galaxy collection install -r requirements.yml
+collections:
+  - name: community.general
+    version: ">=9.0.0"

@@ -1,0 +1,6 @@
+---
+- name: Reload user systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: true
+    scope: user
+  become_user: "{{ constellation_user }}"

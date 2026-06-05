@@ -1,0 +1,11 @@
+---
+# host_vars/wintermute-laptop.yml — Joe's primary wintermute laptop.
+
+gpu: intel
+voice_node: true
+
+# Monitor layout (informational; consumed by desktop role if xrandr tasks added)
+monitors:
+  - name: eDP-1
+    primary: true
+    resolution: "1920x1200"

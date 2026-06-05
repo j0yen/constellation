@@ -1,0 +1,78 @@
+---
+# desktop role defaults
+# This is the AUTHORITATIVE list of desktop + taskbar tools for every node.
+# All constellation nodes install exactly this set; per-host additions go in
+# host_vars via desktop_extra_packages.
+
+desktop_packages:
+  # Window manager + session
+  - xorg-server
+  - xorg-xinit
+  - xorg-xrandr
+  - xorg-xset
+  - xorg-xsetroot
+  - i3-wm
+  - i3status
+  - i3lock
+  - dmenu
+  - rofi
+
+  # Terminal emulator
+  - alacritty
+
+  # Status bar
+  - polybar
+
+  # Compositor
+  - picom
+
+  # Notifications
+  - dunst
+
+  # File manager
+  - thunar
+
+  # Display manager / greeter
+  - greetd
+  - greetd-tuigreet
+
+  # Screenshot / clipboard
+  - flameshot
+  - xclip
+  - xdotool
+
+  # Fonts
+  - ttf-font-awesome
+  - noto-fonts
+  - noto-fonts-emoji
+  - ttf-dejavu
+
+  # Media
+  - pipewire
+  - pipewire-alsa
+  - pipewire-pulse
+  - pipewire-jack
+  - wireplumber
+  - pavucontrol
+
+  # Browser
+  - firefox
+
+  # Development tools (the "full taskbar tool list" every node carries)
+  - neovim
+  - tmux
+  - fzf
+  - ripgrep
+  - fd
+  - bat
+  - eza
+  - zoxide
+  - starship
+  - direnv
+  - stow
+
+  # Rust toolchain (for building wintermute crates locally if needed)
+  - rustup
+
+# Extra packages added by a specific host via host_vars
+desktop_extra_packages: []
