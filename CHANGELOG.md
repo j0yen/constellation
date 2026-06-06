@@ -2,6 +2,40 @@
 
 All notable changes to this project are documented here.
 
+## v0.2.0 — 2026-06-05
+
+**constellation-mesh: one private network with stable names**
+
+Before any bus or job traffic can flow, the roaming laptop, the home desktop,
+and the cloud node need one private, NAT-traversing network with stable names.
+This release enrolls every node into a Tailscale mesh (WireGuard underneath),
+gives each a stable MagicDNS name, restricts access with a committed ACL, and
+makes the cloud node the always-reachable exit/relay — the substrate every
+later layer rides on. MagicDNS names (never IPs) are the load-bearing choice:
+a roaming laptop reconnects from any network with zero config change.
+
+### What's included
+
+- **Ansible `tailscale` role** (`mesh/roles/tailscale/`) — scripted
+  `tailscale up` per node with a pre-authorized auth key pulled from the
+  encrypted `pass` store (`no_log:true`, no plaintext key in the repo);
+  advertises `tag:fleet` + a dynamic `tag:<role>`.
+- **`constellation-mesh` CLI** — `enroll | names | status | acl`. `names`
+  prints the canonical fleet name map (table/json/env) for downstream layers;
+  `status` pings every expected node by MagicDNS name and exits non-zero if the
+  fleet is incomplete; `enroll --dry-run` works without Tailscale installed.
+- **Committed ACL policy** (`mesh/config/acl-policy.hujson`) — mesh-only,
+  default-deny: the bus (`:4222`/`:7422`) and brain (`:8080`) ports are
+  reachable only from fleet tags, never from a public/wildcard source.
+- **Headscale variant** (`mesh/docs/headscale.md` + `--headscale <url>` flag) —
+  the self-hosted-control-plane sovereignty path, documented and selectable.
+- **Roaming + fallback docs** (`mesh/docs/roaming-test.md`) — the documented
+  reproducible tests for cross-NAT reach to the tower's brain/STT port (AC2–4),
+  the keep-awake-vs-WoL decision, and the brain-ladder cloud fallback (AC6).
+- **Offline gates** — `tests/mesh-role-check.sh` (role/enrollment invariants,
+  AC1/AC7/AC8/AC10) and `tests/acl-policy-check.sh` (ACL mesh-only semantics,
+  AC5/AC7/AC10) prove the invariants without a live tailnet.
+
 ## v0.1.0 — 2026-06-05
 
 **constellation-cloud: the always-on hub that keeps the fleet coherent**
