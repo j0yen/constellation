@@ -1,0 +1,88 @@
+---
+# headscale Ansible role defaults — self-hosted Tailscale control plane.
+# Deployed on the cloud node (hub) only.
+
+# ---------------------------------------------------------------------------
+# Headscale version + install
+# ---------------------------------------------------------------------------
+headscale_version: "0.23.0"
+headscale_arch: "amd64"                             # override to arm64 for ARM cloud
+headscale_install_dir: /usr/local/bin
+headscale_bin: "{{ headscale_install_dir }}/headscale"
+
+# ---------------------------------------------------------------------------
+# Paths — all on the persisted volume so a rebuild preserves state
+# ---------------------------------------------------------------------------
+headscale_config_dir: /etc/headscale
+headscale_config_file: "{{ headscale_config_dir }}/config.yaml"
+headscale_acl_file: "{{ headscale_config_dir }}/acl.hujson"
+headscale_state_dir: /var/lib/headscale
+headscale_db_path: "{{ headscale_state_dir }}/db.sqlite"
+headscale_noise_key_file: "{{ headscale_state_dir }}/noise_private.key"
+headscale_socket: /var/run/headscale/headscale.sock
+headscale_run_dir: /var/run/headscale
+headscale_log_dir: /var/log/headscale
+headscale_backup_dir: /var/lib/headscale/backups
+
+# ---------------------------------------------------------------------------
+# Service identity
+# ---------------------------------------------------------------------------
+headscale_user: headscale
+headscale_group: headscale
+
+# ---------------------------------------------------------------------------
+# Network — minimal public surface:
+#   - GRPC/control+DERP only on the mesh-internal + localhost iface
+#   - Port 443 required only if you front headscale with a reverse proxy (recommended)
+# ---------------------------------------------------------------------------
+# Bind address for headscale control plane.
+# IMPORTANT: bind to tailscale iface or loopback + reverse-proxy, NOT 0.0.0.0:8080.
+# The cloud role's nftables firewall blocks 8080 from non-fleet sources.
+headscale_listen_addr: "127.0.0.1:8080"            # loopback; nginx/caddy terminates TLS
+headscale_metrics_listen_addr: "127.0.0.1:9090"
+headscale_server_url: "https://hub.constellation.internal"
+
+# ---------------------------------------------------------------------------
+# MagicDNS
+# ---------------------------------------------------------------------------
+headscale_base_domain: constellation.internal
+headscale_dns_config:
+  magic_dns: true
+  base_domain: "{{ headscale_base_domain }}"
+  nameservers: []
+  override_local_dns: false
+
+# ---------------------------------------------------------------------------
+# Fleet user (Headscale uses "users" as the auth namespace; one per fleet)
+# ---------------------------------------------------------------------------
+headscale_fleet_user: constellation
+
+# ---------------------------------------------------------------------------
+# Secret store (pass(1) paths)
+# ---------------------------------------------------------------------------
+# Path in the pass(1) store where the Headscale noise private key is stored.
+# NEVER generated into the repo; managed by constellation-secrets.
+headscale_noise_key_pass_path: "constellation/headscale/noise-private-key"
+
+# Pre-auth key pass path template; role tag is substituted:
+#   constellation/headscale/preauth-key-laptop
+#   constellation/headscale/preauth-key-cloud
+#   etc.
+headscale_preauth_key_pass_prefix: "constellation/headscale/preauth-key"
+
+# ---------------------------------------------------------------------------
+# Pre-auth key defaults (used by preauth.sh)
+# ---------------------------------------------------------------------------
+headscale_preauth_reusable: true
+headscale_preauth_expiration: "90d"
+
+# ---------------------------------------------------------------------------
+# ACL source: the canonical fleet policy lives in mesh/config/acl-policy.hujson.
+# This role copies it to /etc/headscale/acl.hujson.
+# ---------------------------------------------------------------------------
+headscale_acl_src: "{{ playbook_dir }}/../mesh/config/acl-policy.hujson"
+
+# ---------------------------------------------------------------------------
+# Backup retention
+# ---------------------------------------------------------------------------
+headscale_backup_keep: 7                           # keep last N daily backups

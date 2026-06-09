@@ -1,0 +1,12 @@
+---
+- name: Restart headscale
+  ansible.builtin.systemd:
+    name: headscale
+    state: restarted
+  become: true
+
+- name: Reload headscale
+  ansible.builtin.systemd:
+    name: headscale
+    state: reloaded
+  become: true

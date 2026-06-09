@@ -1,0 +1,65 @@
+---
+# Headscale configuration — managed by constellation-headscale Ansible role.
+# DO NOT edit manually; re-run the Ansible play to update.
+#
+# Minimal public surface (AC9):
+#   listen_addr is bound to loopback; a reverse proxy (nginx/caddy) provides TLS
+#   termination on the real external URL. nftables blocks direct access to 8080
+#   from non-fleet sources.
+
+server_url: "{{ headscale_server_url }}"
+listen_addr: "{{ headscale_listen_addr }}"
+metrics_listen_addr: "{{ headscale_metrics_listen_addr }}"
+grpc_listen_addr: "127.0.0.1:50443"
+grpc_allow_insecure: false
+
+# Private key — loaded from constellation-secrets, NOT generated here (AC2).
+private_key_path: "{{ headscale_noise_key_file }}"
+
+# Noise pre-shared key for DERP challenge; auto-generated on first start if absent.
+noise:
+  private_key_path: "{{ headscale_noise_key_file }}"
+
+# Database
+db_type: sqlite3
+db_path: "{{ headscale_db_path }}"
+
+# ACL — derived from mesh's canonical policy (AC3).
+acl_policy_path: "{{ headscale_acl_file }}"
+
+# MagicDNS — mirrors mesh's tailnet DNS behavior.
+dns_config:
+  magic_dns: {{ headscale_dns_config.magic_dns | lower }}
+  base_domain: "{{ headscale_dns_config.base_domain }}"
+  nameservers: {{ headscale_dns_config.nameservers | to_json }}
+  override_local_dns: {{ headscale_dns_config.override_local_dns | lower }}
+
+# Log
+log:
+  level: info
+  format: text
+
+# UNIX socket for headscale CLI (lower attack surface than HTTP admin API).
+unix_socket: "{{ headscale_socket }}"
+unix_socket_permission: "0770"
+
+# Disable the deprecated v1 API; use socket CLI.
+disable_check_updates: true
+ephemeral_node_inactivity_timeout: 30m
+
+# DERP — use Tailscale's hosted DERP by default; override in host_vars if
+# you want a private DERP on the cloud node.
+derp:
+  server:
+    enabled: false
+  urls:
+    - https://controlplane.tailscale.com/derpmap/default
+  auto_update_enabled: true
+  update_frequency: 24h
+
+# TLS — handled by reverse proxy; headscale itself speaks plain HTTP on loopback.
+tls_letsencrypt_hostname: ""
+tls_letsencrypt_cache_dir: "{{ headscale_state_dir }}/cache"
+tls_letsencrypt_challenge_type: HTTP-01
+tls_cert_path: ""
+tls_key_path: ""

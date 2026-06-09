@@ -1,0 +1,43 @@
+[Unit]
+Description=Headscale — self-hosted Tailscale control plane
+Documentation=https://headscale.net
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User={{ headscale_user }}
+Group={{ headscale_group }}
+
+ExecStart={{ headscale_bin }} serve
+ExecReload=/bin/kill -HUP $MAINPID
+
+Restart=on-failure
+RestartSec=5s
+
+# Runtime directory (managed by systemd)
+RuntimeDirectory=headscale
+RuntimeDirectoryMode=0750
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+RestrictRealtime=true
+RestrictSUIDSGID=true
+
+# Filesystem access: allow only what headscale needs
+ReadWritePaths={{ headscale_state_dir }} {{ headscale_run_dir }} {{ headscale_log_dir }}
+ReadOnlyPaths={{ headscale_config_dir }}
+
+[Install]
+WantedBy=multi-user.target

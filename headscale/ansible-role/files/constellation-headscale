@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# constellation headscale — thin CLI wrapper for operating the Headscale control plane.
+#
+# Usage:
+#   constellation headscale status              — server up + DB reachable + node roster
+#   constellation headscale selftest            — register throwaway node, assert roster, expire
+#   constellation headscale preauth --role TAG  — mint pre-auth key → secret store
+#   constellation headscale node list           — list registered nodes
+#   constellation headscale node register NAME  — register a node by key
+#   constellation headscale node expire NAME    — expire a node
+#   constellation headscale node delete NAME    — remove a node from the roster
+#   constellation headscale switch [saas|self]  — print switch instructions
+#
+# SIGPIPE: stdout is guarded against broken-pipe panic — short pipelines (head, grep)
+# work without error (AC10).
+#
+# No Headscale key or pre-auth key plaintext is ever committed.
+set -uo pipefail
+
+# Guard against SIGPIPE: ignore the signal so 'head', 'grep | head', etc. don't
+# produce non-zero exit or error messages from a broken pipe (AC10).
+trap '' PIPE
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Sub-commands delegate to specialized scripts in the same directory.
+PREAUTH_SCRIPT="${SCRIPT_DIR}/headscale-preauth.sh"
+STATUS_SCRIPT="${SCRIPT_DIR}/headscale-status.sh"
+SELFTEST_SCRIPT="${SCRIPT_DIR}/headscale-selftest.sh"
+NODE_SCRIPT="${SCRIPT_DIR}/headscale-node.sh"
+
+usage() {
+    grep '^#[^!]' "$0" | head -20 | sed 's/^# \?//'
+    exit 0
+}
+
+if [[ $# -eq 0 ]]; then
+    usage
+fi
+
+SUBCOMMAND="$1"
+shift
+
+case "$SUBCOMMAND" in
+    status)
+        exec "$STATUS_SCRIPT" "$@"
+        ;;
+    selftest)
+        exec "$SELFTEST_SCRIPT" "$@"
+        ;;
+    preauth)
+        exec "$PREAUTH_SCRIPT" "$@"
+        ;;
+    node)
+        exec "$NODE_SCRIPT" "$@"
+        ;;
+    switch)
+        exec "$SCRIPT_DIR/headscale-switch.sh" "$@"
+        ;;
+    -h|--help|help)
+        usage
+        ;;
+    *)
+        echo "Unknown subcommand: $SUBCOMMAND" >&2
+        usage
+        ;;
+esac

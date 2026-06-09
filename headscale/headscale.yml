@@ -1,0 +1,21 @@
+---
+# constellation-headscale playbook — provision the Headscale control plane on the cloud node.
+#
+# Usage:
+#   ansible-playbook -i ansible/inventory/hosts headscale/headscale.yml
+#   ansible-playbook -i ansible/inventory/hosts headscale/headscale.yml --check   # dry-run
+#   ansible-playbook -i ansible/inventory/hosts headscale/headscale.yml --tags status
+#
+# Applies only to the [cloud] inventory group.
+# Requires:
+#   - constellation-secrets: noise key in pass at constellation/headscale/noise-private-key
+#   - constellation-cloud: cloud node provisioned and reachable
+
+- name: Provision Headscale control plane
+  hosts: cloud
+  become: true
+  gather_facts: true
+  vars_files:
+    - "{{ playbook_dir }}/../ansible/group_vars/all.yml"
+  roles:
+    - role: "{{ playbook_dir }}/ansible-role"

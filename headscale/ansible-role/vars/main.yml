@@ -1,0 +1,20 @@
+---
+# Role-internal constants — not meant for override.
+
+headscale_release_url: >-
+  https://github.com/juanfont/headscale/releases/download/v{{ headscale_version }}/headscale_{{ headscale_version }}_linux_{{ headscale_arch }}
+
+headscale_service_name: headscale
+
+# Directories to create and own on the cloud node.
+headscale_dirs:
+  - path: "{{ headscale_config_dir }}"
+    mode: "0750"
+  - path: "{{ headscale_state_dir }}"
+    mode: "0750"
+  - path: "{{ headscale_run_dir }}"
+    mode: "0750"
+  - path: "{{ headscale_log_dir }}"
+    mode: "0755"
+  - path: "{{ headscale_backup_dir }}"
+    mode: "0700"
