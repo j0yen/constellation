@@ -1,5 +1,5 @@
 ---
-# voice role defaults — only applied when voice_node: true.
+# voice role defaults — governs the per-host voice front-end on/off.
 
 # Path to wintermute systemd user units (installed by wintermute-bootstrap)
 wintermute_units_dir: "{{ constellation_user_home }}/.config/systemd/user"
@@ -15,3 +15,19 @@ wintermute_daemons:
 
 # agorabus unit name
 agorabus_unit: agorabus.service
+
+# Voice front-end units — ONLY these are gated by voice_node.
+# The coordination stack (agorabus, brain ladder, dispatch) is governed by
+# its own units and is NOT in this list (it runs on every fleet node).
+#
+# Role-based defaults for voice_node (overridden per-host in host_vars):
+#   laptop / companion  → voice_node: true   (has a mic, runs the voice front-end)
+#   desktop / cloud     → voice_node: false  (headless or compute-only)
+#
+# Single source of truth: set voice_node in host_vars/<host>.yml (or omit to
+# inherit the group_vars/all.yml default of false).
+voice_frontend_units:
+  - wm-audio.service
+  - wm-stt.service
+  - wm-wake.service
+  - wm-vad.service

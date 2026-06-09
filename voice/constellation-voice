@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# constellation voice — manage the per-host voice front-end role.
+#
+# Subcommands:
+#   status   [--json] [--host <name>] [--ansible-dir <path>] [--dry-run]
+#   help
+#
+# This script is read-only: it reports state, it does NOT change unit state.
+# To provision or re-role a host, use: ansible-playbook -i inventory/hosts site.yml
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPTS_DIR="${SCRIPT_DIR}/scripts"
+
+usage() {
+    cat <<'EOF'
+constellation voice — per-host voice front-end role management
+
+Usage:
+  constellation-voice <subcommand> [options]
+
+Subcommands:
+  status    Report expected vs actual voice front-end state for this host.
+            Options: --json               emit JSON output
+                     --host <name>        check a specific host_vars/<name>.yml
+                     --ansible-dir <dir>  path to ansible directory
+                     --dry-run            offline mode: read flag only, no systemctl
+            Exit code: 0=OK (expected==actual), 1=mismatch, 2=error
+  help      Show this message.
+
+Notes:
+  - This command is READ-ONLY. It reports state; it does not change it.
+  - To flip a host's voice_node flag and converge:
+      1. Edit ansible/host_vars/<host>.yml  (set voice_node: true/false)
+      2. ansible-playbook -i inventory/hosts site.yml --limit <host>
+  - Role defaults (from group_vars/all.yml):
+      laptop / companion  → voice_node: true
+      desktop / cloud     → voice_node: false  (group_vars default is false)
+  - The coordination stack (agorabus, brain ladder, dispatch) is NOT gated by
+    voice_node. It runs on every fleet node regardless of this flag.
+  - See voice/docs/brain-only-mode.md for the "serves STT/brain without a local
+    mic" middle-ground configuration.
+EOF
+}
+
+SUBCOMMAND="${1:-help}"
+shift || true
+
+case "$SUBCOMMAND" in
+    status)
+        exec bash "${SCRIPTS_DIR}/status.sh" "$@"
+        ;;
+    help|-h|--help)
+        usage
+        ;;
+    *)
+        printf 'Unknown subcommand: %s\n' "$SUBCOMMAND" >&2
+        usage >&2
+        exit 1
+        ;;
+esac

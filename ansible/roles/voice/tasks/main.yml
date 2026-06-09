@@ -1,9 +1,52 @@
 ---
 # voice role tasks — wires wintermute.target + wm-* daemons.
-# Only applied when voice_node: true (enforced by the when: clause in site.yml).
+#
+# Called unconditionally from site.yml with a voice_node flag check so that
+# re-applying with voice_node flipped converges cleanly (AC6 idempotent re-role).
 #
 # Pre-condition: wintermute-bootstrap must have already installed the wm-*
 # binaries and unit files (this role enables/wires them; it does NOT install them).
+#
+# voice_node: true  — enable + start the full voice front-end (wm-audio, wm-stt,
+#                     wake/VAD chain) and wire the i3→graphical-session bridge.
+# voice_node: false — disable + stop the voice front-end; coordination stack
+#                     (agorabus + brain ladder/dispatch) still comes up.
+
+# ---------------------------------------------------------------------------
+# VOICE-OFF path: stop + disable voice front-end units (AC2, AC6)
+# ---------------------------------------------------------------------------
+- name: Disable voice front-end units on non-voice nodes
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: false
+    state: stopped
+    scope: user
+  become_user: "{{ constellation_user }}"
+  loop: "{{ voice_frontend_units }}"
+  ignore_errors: true   # units may not exist on a fresh node — that is fine
+  when: not (voice_node | default(false) | bool)
+
+- name: Disable wintermute.target on non-voice nodes
+  ansible.builtin.systemd:
+    name: wintermute.target
+    enabled: false
+    scope: user
+  become_user: "{{ constellation_user }}"
+  ignore_errors: true
+  when: not (voice_node | default(false) | bool)
+
+# End early for non-voice nodes — coordination stack (agorabus + brain ladder)
+# is governed by its own role/unit; this role only controls the voice front-end.
+- name: Confirm voice front-end is NOT installed on this host (AC3 assertion tag)
+  ansible.builtin.debug:
+    msg: >
+      voice_node=false — voice front-end (wm-audio/wm-stt/wake-vad) is disabled.
+      Coordination stack (agorabus, brain ladder, dispatch worker) is unaffected.
+  when: not (voice_node | default(false) | bool)
+
+# ---------------------------------------------------------------------------
+# Everything below runs only on voice nodes (voice_node: true)
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # 1. Verify wm-* binaries are present
@@ -13,6 +56,7 @@
     path: "{{ wintermute_bin_prefix }}/{{ item }}"
   register: bin_stat
   loop: "{{ wintermute_daemons }}"
+  when: voice_node | default(false) | bool
 
 - name: Fail if any daemon binary is missing
   ansible.builtin.fail:
@@ -20,7 +64,9 @@
       Daemon binary '{{ item.item }}' not found at
       {{ wintermute_bin_prefix }}/{{ item.item }}.
       Run wintermute-bootstrap first.
-  when: not item.stat.exists
+  when:
+    - voice_node | default(false) | bool
+    - not item.stat.exists
   loop: "{{ bin_stat.results }}"
 
 # ---------------------------------------------------------------------------
@@ -34,6 +80,7 @@
     group: "{{ constellation_user }}"
     mode: "0755"
   become_user: "{{ constellation_user }}"
+  when: voice_node | default(false) | bool
 
 - name: Install wintermute.target user unit
   ansible.builtin.copy:
@@ -51,12 +98,14 @@
       WantedBy=graphical-session.target
   become_user: "{{ constellation_user }}"
   notify: Reload user systemd daemon
+  when: voice_node | default(false) | bool
 
 # ---------------------------------------------------------------------------
 # 3. Enable wintermute.target and verify units are enabled
 # ---------------------------------------------------------------------------
 - name: Flush handlers before enabling units
   ansible.builtin.meta: flush_handlers
+  when: voice_node | default(false) | bool
 
 - name: Enable wintermute.target for the constellation user
   ansible.builtin.systemd:
@@ -64,6 +113,7 @@
     enabled: true
     scope: user
   become_user: "{{ constellation_user }}"
+  when: voice_node | default(false) | bool
 
 - name: Enable agorabus.service for the constellation user
   ansible.builtin.systemd:
@@ -71,6 +121,16 @@
     enabled: true
     scope: user
   become_user: "{{ constellation_user }}"
+  when: voice_node | default(false) | bool
+
+- name: Enable voice front-end units on voice nodes
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    scope: user
+  become_user: "{{ constellation_user }}"
+  loop: "{{ voice_frontend_units }}"
+  when: voice_node | default(false) | bool
 
 # ---------------------------------------------------------------------------
 # 4. Verify graphical-session.target bridge is in place
@@ -80,10 +140,13 @@
   ansible.builtin.stat:
     path: /usr/local/bin/constellation-xinitrc
   register: bridge_stat
+  when: voice_node | default(false) | bool
 
 - name: Fail if i3 graphical-session bridge is missing
   ansible.builtin.fail:
     msg: >
       /usr/local/bin/constellation-xinitrc is missing.
       The desktop role must run before the voice role.
-  when: not bridge_stat.stat.exists
+  when:
+    - voice_node | default(false) | bool
+    - not bridge_stat.stat.exists

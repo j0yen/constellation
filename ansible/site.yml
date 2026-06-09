@@ -7,6 +7,7 @@
 #
 # Roles applied in order:
 #   base    — pacman config + local wintermute repo + linux-wintermute kernel + base packages
+#   secrets — bootstrap + service-secret layer (MUST precede all secret-consuming roles)
 #   desktop — i3 + terminal + status bar + the authoritative tool list (skipped on cloud)
 #   voice   — wm-* daemons + wintermute.target (only on voice_node hosts)
 #   cloud   — NATS hub + Tailscale exit + fallback brain (only on [cloud] group hosts)
@@ -17,9 +18,12 @@
   gather_facts: true
   roles:
     - role: base
+    - role: secrets   # bootstrap age key + render EnvironmentFiles before consumers
     - role: desktop
       when: "'cloud' not in group_names"
     - role: voice
-      when: voice_node | default(false) | bool
+      # voice role runs unconditionally so it can disable units on non-voice nodes
+      # (idempotent re-role: flipping voice_node and re-applying converges — AC6).
+      # The role itself branches on voice_node internally.
     - role: cloud
       when: "'cloud' in group_names"
