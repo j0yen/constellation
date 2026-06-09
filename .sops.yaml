@@ -1,0 +1,51 @@
+# .sops.yaml — sops creation-rule mapping for constellation secrets.
+#
+# Each rule maps a path glob to the recipient age public key(s) for that role.
+# A secret encrypted for role:cloud is NOT decryptable with a role:laptop-only key.
+#
+# Key management:
+#   - Each physical host has exactly ONE root age identity at ~/.config/sops/age/keys.txt
+#   - Public keys are committed here; private keys are NEVER committed
+#   - To generate a new host key:  age-keygen -o /tmp/new-host.key
+#   - Extract public key:          age-keygen -y /tmp/new-host.key
+#   - Deliver private key out-of-band via: constellation-secrets bootstrap --key-file /tmp/new-host.key
+#
+# Adding a new host:
+#   1. Generate age keypair for the host (see above)
+#   2. Add the public key to the appropriate recipient list below
+#   3. Re-encrypt any secrets that should be readable by the new host:
+#      sops updatekeys secrets/<role>/<name>.yaml
+#
+# IMPORTANT: The "age_public_keys" values below are PLACEHOLDERS. Replace them
+# with the real public keys of your fleet nodes before encrypting real secrets.
+# The placeholder format shows where to put each key.
+
+creation_rules:
+  # ---------------------------------------------------------------------------
+  # Shared secrets — readable by ALL roles (laptop + cloud + future nodes)
+  # ---------------------------------------------------------------------------
+  - path_regex: secrets/shared/.*\.yaml$
+    age: >-
+      age1laptop000000000000000000000000000000000000000000000000000000000,
+      age1cloud0000000000000000000000000000000000000000000000000000000000
+    # Replace with real public keys. Example multi-recipient encryption:
+    #   age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p,
+    #   age1p0rlsftp2v0l6v0nhygavp5xpfkmt8fkm5l4m42xrg7l9r8k5krs8z5c9m
+
+  # ---------------------------------------------------------------------------
+  # Laptop-role secrets — only readable by laptop host key(s)
+  # ---------------------------------------------------------------------------
+  - path_regex: secrets/laptop/.*\.yaml$
+    age: >-
+      age1laptop000000000000000000000000000000000000000000000000000000000
+    # Replace with the laptop host's actual public age key.
+
+  # ---------------------------------------------------------------------------
+  # Cloud-role secrets — only readable by cloud host key(s)
+  # ---------------------------------------------------------------------------
+  - path_regex: secrets/cloud/.*\.yaml$
+    age: >-
+      age1cloud0000000000000000000000000000000000000000000000000000000000
+    # Replace with the cloud node's actual public age key.
+    # NOTE: A secret encrypted only for role:cloud cannot be decrypted by
+    # the laptop key — this is the isolation guarantee (AC4).

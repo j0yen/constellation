@@ -4,6 +4,16 @@
 *.age.dec
 auth-key-*[^.age]
 
+# age private key files — NEVER commit
+keys.txt
+*.age-private
+
+# Decrypted secret plaintext — NEVER commit
+secrets/*.dec
+secrets/**/*.dec
+secrets/*.plain
+secrets/**/*.plain
+
 # Node-role override (local machine state)
 mesh/config/node-role
 
