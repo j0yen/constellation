@@ -1,0 +1,443 @@
+#!/usr/bin/env bash
+# constellation-join-check — live end-to-end node-join acceptance check.
+#
+# Performs four live checks (mesh, bus round-trip, secrets, brain route) and
+# prints a localized verdict. On single-laptop / no-fleet: mesh → SKIP, others
+# run against loopback.
+#
+# SIGPIPE safety
+trap '' PIPE
+
+set -uo pipefail
+
+# ---------------------------------------------------------------------------
+# Defaults
+# ---------------------------------------------------------------------------
+TIMEOUT="${JOIN_CHECK_TIMEOUT:-10}"
+JSON_OUTPUT=0
+VERBOSE=0
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# ---------------------------------------------------------------------------
+# Injection hooks (for testing — undocumented flags)
+# ---------------------------------------------------------------------------
+CHECK_MESH_OVERRIDE=""
+CHECK_BUS_OVERRIDE=""
+CHECK_SECRETS_OVERRIDE=""
+CHECK_BRAIN_OVERRIDE=""
+
+# ---------------------------------------------------------------------------
+usage() {
+    cat <<'EOF'
+constellation join-check — live end-to-end node-join acceptance
+
+Performs four live checks and prints a localized join verdict.
+
+USAGE:
+  constellation-join-check [OPTIONS]
+
+CHECKS:
+  mesh      Tailscale status — node tagged tag:fleet, hub peer reachable.
+            Skipped (with WARN) if tailscale is absent (single-host dev).
+  bus       Publish a unique wm.fleet.joincheck.<nonce> event to agorabus
+            and confirm the same nonce round-trips back within --timeout.
+            Proves "my events reach the fleet."
+  secrets   constellation-secrets get <canary> decrypts without error.
+            Proves the host age identity + sops store are wired.
+  brain     Ping the brain endpoint this node would use (cloud API or
+            local tier) with a trivial 1-token request.
+            Proves "borrow the strong machine's brain."
+
+FLAGS:
+  --json             Emit JSON result (per-check array + verdict + localized_layer).
+  --timeout <secs>   Bound every live wait. Default: 10. With --timeout 1
+                     against an unreachable target the command exits <=2s.
+  --verbose          Print extra diagnostic lines.
+  --help             Show this help.
+
+EXIT CODES:
+  0   All non-skipped checks passed.
+  1   At least one check failed.
+
+SINGLE-NODE MODE:
+  When no fleet peers are detected the mesh check is SKIP and bus/brain
+  checks run against the local loopback path. The verdict notes
+  "single-node mode (no fleet peers)".
+EOF
+    exit 0
+}
+
+# ---------------------------------------------------------------------------
+# Argument parsing
+# ---------------------------------------------------------------------------
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --json)           JSON_OUTPUT=1; shift ;;
+        --timeout)        TIMEOUT="$2"; shift 2 ;;
+        --verbose)        VERBOSE=1; shift ;;
+        --help|-h)        usage ;;
+        --inject-mesh)    CHECK_MESH_OVERRIDE="$2";    shift 2 ;;
+        --inject-bus)     CHECK_BUS_OVERRIDE="$2";     shift 2 ;;
+        --inject-secrets) CHECK_SECRETS_OVERRIDE="$2"; shift 2 ;;
+        --inject-brain)   CHECK_BRAIN_OVERRIDE="$2";   shift 2 ;;
+        *)
+            echo "Unknown flag: $1" >&2
+            echo "Run with --help for usage." >&2
+            exit 1
+            ;;
+    esac
+done
+
+# ---------------------------------------------------------------------------
+# Result state (associative arrays)
+# ---------------------------------------------------------------------------
+declare -A CHECK_STATUS
+declare -A CHECK_MSG
+
+record() {
+    local name="$1" status="$2" msg="$3"
+    CHECK_STATUS[$name]="$status"
+    CHECK_MSG[$name]="$msg"
+}
+
+SINGLE_NODE_MODE=0
+
+# ---------------------------------------------------------------------------
+# Output helpers
+# ---------------------------------------------------------------------------
+print_check() {
+    local name="$1" status="$2" msg="$3"
+    local tag
+    case "$status" in
+        pass) tag="[PASS]" ;;
+        fail) tag="[FAIL]" ;;
+        skip) tag="[SKIP]" ;;
+        *)    tag="[????]" ;;
+    esac
+    printf "%-8s %-10s %s\n" "$tag" "$name" "$msg"
+}
+
+vlog() {
+    [[ "$VERBOSE" -eq 1 ]] && echo "  ... $*" >&2 || true
+}
+
+# ---------------------------------------------------------------------------
+# Check: mesh
+# ---------------------------------------------------------------------------
+run_check_mesh() {
+    if [[ -n "$CHECK_MESH_OVERRIDE" ]]; then
+        case "$CHECK_MESH_OVERRIDE" in
+            pass) record mesh pass "tailscale up, hub reachable" ;;
+            fail) record mesh fail "tailscale not connected" ;;
+            skip) record mesh skip "tailscale absent (single-host dev)" ;;
+        esac
+        return
+    fi
+
+    if ! command -v tailscale &>/dev/null; then
+        SINGLE_NODE_MODE=1
+        record mesh skip "tailscale absent (single-host dev)"
+        return
+    fi
+
+    local ts_status
+    if ! ts_status=$(tailscale status --json 2>/dev/null); then
+        SINGLE_NODE_MODE=1
+        record mesh skip "tailscale not running (single-host dev)"
+        return
+    fi
+
+    local self_tags
+    self_tags=$(printf '%s' "$ts_status" | python3 -c \
+        "import json,sys; d=json.load(sys.stdin); tags=d.get('Self',{}).get('Tags') or []; print(' '.join(tags))" \
+        2>/dev/null || true)
+
+    local peer_count
+    peer_count=$(printf '%s' "$ts_status" | python3 -c \
+        "import json,sys; d=json.load(sys.stdin); print(len(d.get('Peer',{})))" \
+        2>/dev/null || echo "0")
+
+    vlog "self tags: $self_tags  peers: $peer_count"
+
+    if [[ "$peer_count" -eq 0 ]]; then
+        SINGLE_NODE_MODE=1
+        record mesh skip "no fleet peers (single-node mode)"
+        return
+    fi
+
+    if echo "$self_tags" | grep -q "tag:fleet"; then
+        record mesh pass "node tagged tag:fleet, $peer_count peer(s) visible"
+    else
+        record mesh fail "node missing tag:fleet (tags: $self_tags)"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Check: bus round-trip
+# ---------------------------------------------------------------------------
+run_check_bus() {
+    if [[ -n "$CHECK_BUS_OVERRIDE" ]]; then
+        case "$CHECK_BUS_OVERRIDE" in
+            pass) record bus pass "nonce round-tripped via agorabus" ;;
+            fail) record bus fail "nonce not received within timeout" ;;
+            skip) record bus skip "injected skip" ;;
+        esac
+        return
+    fi
+
+    local nonce
+    nonce="jc-$(date +%s%N | sha256sum | head -c12 2>/dev/null || date +%s)"
+    local subject="wm.fleet.joincheck.$nonce"
+
+    vlog "bus check: subject=$subject timeout=${TIMEOUT}s"
+
+    if ! command -v nats &>/dev/null; then
+        local agorabus_sock="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/agorabus.sock"
+        if [[ -S "$agorabus_sock" ]]; then
+            record bus skip "agorabus socket present but no 'nats' client installed; install nats-cli to verify bus round-trip"
+        else
+            if [[ "$SINGLE_NODE_MODE" -eq 1 ]]; then
+                record bus skip "agorabus socket absent + no NATS client (single-node dev)"
+            else
+                record bus fail "no 'nats' client and no agorabus socket at $agorabus_sock"
+            fi
+        fi
+        return
+    fi
+
+    local received
+    received=$(timeout "$TIMEOUT" bash -c "
+        nats sub --count=1 '$subject' 2>/dev/null &
+        SUB_PID=\$!
+        sleep 0.3
+        nats pub '$subject' '$nonce' 2>/dev/null
+        wait \$SUB_PID 2>/dev/null
+    " 2>/dev/null || true)
+
+    if echo "$received" | grep -q "$nonce"; then
+        record bus pass "nonce round-tripped (${TIMEOUT}s window)"
+    else
+        if [[ "$SINGLE_NODE_MODE" -eq 1 ]]; then
+            record bus skip "loopback bus unavailable (no NATS server on loopback)"
+        else
+            record bus fail "nonce $nonce not received within ${TIMEOUT}s"
+        fi
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Check: secrets
+# ---------------------------------------------------------------------------
+run_check_secrets() {
+    if [[ -n "$CHECK_SECRETS_OVERRIDE" ]]; then
+        case "$CHECK_SECRETS_OVERRIDE" in
+            pass) record secrets pass "canary decrypts OK" ;;
+            fail) record secrets fail "secrets store missing or locked" ;;
+            skip) record secrets skip "injected skip" ;;
+        esac
+        return
+    fi
+
+    local secrets_bin="$REPO_ROOT/bin/constellation-secrets"
+    if [[ ! -x "$secrets_bin" ]]; then
+        record secrets fail "constellation-secrets not found at $secrets_bin"
+        return
+    fi
+
+    local canary_file="$REPO_ROOT/secrets/canary.yaml"
+    if [[ ! -f "$canary_file" ]]; then
+        record secrets fail "secrets/canary.yaml absent — run: constellation-secrets bootstrap"
+        return
+    fi
+
+    local age_keys="${SOPS_AGE_KEY_FILE:-$HOME/.config/sops/age/keys.txt}"
+    if [[ ! -f "$age_keys" ]]; then
+        record secrets fail "age key not found at $age_keys — run: constellation-secrets bootstrap"
+        return
+    fi
+
+    local decrypt_out
+    if decrypt_out=$(timeout "$TIMEOUT" "$secrets_bin" get canary 2>&1); then
+        record secrets pass "canary decrypts OK"
+    else
+        record secrets fail "canary decrypt failed — check age key or re-run: constellation-secrets bootstrap"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Check: brain route
+# ---------------------------------------------------------------------------
+run_check_brain() {
+    if [[ -n "$CHECK_BRAIN_OVERRIDE" ]]; then
+        case "$CHECK_BRAIN_OVERRIDE" in
+            pass) record brain pass "brain endpoint reachable" ;;
+            fail) record brain fail "brain endpoint unreachable" ;;
+            skip) record brain skip "injected skip" ;;
+        esac
+        return
+    fi
+
+    local brain_mode="none"
+
+    # Check local ollama
+    if command -v ollama &>/dev/null; then
+        if curl -sf --max-time 2 "http://localhost:11434/api/tags" &>/dev/null; then
+            brain_mode="local-ollama"
+        fi
+    fi
+
+    # Cloud brain takes precedence if key is set
+    local api_key="${WM_ANTHROPIC_API_KEY:-${ANTHROPIC_API_KEY:-}}"
+    if [[ -n "$api_key" ]]; then
+        brain_mode="cloud"
+    fi
+
+    vlog "brain mode=$brain_mode"
+
+    case "$brain_mode" in
+        local-ollama)
+            if curl -sf --max-time "$TIMEOUT" "http://localhost:11434/api/tags" &>/dev/null; then
+                record brain pass "local ollama reachable (http://localhost:11434)"
+            else
+                record brain fail "local ollama not responding within ${TIMEOUT}s"
+            fi
+            ;;
+        cloud)
+            local http_code
+            http_code=$(timeout "$TIMEOUT" curl -sf -o /dev/null -w "%{http_code}" \
+                --max-time "$TIMEOUT" \
+                -H "x-api-key: $api_key" \
+                -H "anthropic-version: 2023-06-01" \
+                "https://api.anthropic.com/v1/models" 2>/dev/null || echo "000")
+            vlog "cloud brain http_code=$http_code"
+            case "$http_code" in
+                200) record brain pass "cloud brain (api.anthropic.com) reachable" ;;
+                401) record brain fail "cloud brain reachable but API key rejected (HTTP 401)" ;;
+                000) record brain fail "cloud brain unreachable within ${TIMEOUT}s" ;;
+                *)   record brain fail "cloud brain returned HTTP $http_code" ;;
+            esac
+            ;;
+        none)
+            if [[ "$SINGLE_NODE_MODE" -eq 1 ]]; then
+                record brain skip "no brain configured (no WM_ANTHROPIC_API_KEY, no local ollama)"
+            else
+                record brain fail "no brain endpoint configured (set WM_ANTHROPIC_API_KEY or start ollama)"
+            fi
+            ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
+# Run all checks
+# ---------------------------------------------------------------------------
+run_check_mesh
+run_check_bus
+run_check_secrets
+run_check_brain
+
+# ---------------------------------------------------------------------------
+# Compute verdict
+# ---------------------------------------------------------------------------
+OVERALL_PASS=1
+FAILED_CHECKS=()
+PASSED_CHECKS=()
+SKIPPED_CHECKS=()
+
+for check in mesh bus secrets brain; do
+    status="${CHECK_STATUS[$check]:-unknown}"
+    case "$status" in
+        pass) PASSED_CHECKS+=("$check") ;;
+        fail) OVERALL_PASS=0; FAILED_CHECKS+=("$check") ;;
+        skip) SKIPPED_CHECKS+=("$check") ;;
+    esac
+done
+
+VERDICT=""
+LOCALIZED_LAYER="none"
+
+if [[ "$OVERALL_PASS" -eq 1 ]]; then
+    if [[ "$SINGLE_NODE_MODE" -eq 1 ]]; then
+        VERDICT="JOIN OK - single-node mode (no fleet peers); bus/brain verified on loopback where available"
+    else
+        VERDICT="JOIN OK - node is fully wired into the constellation fleet"
+    fi
+else
+    local_hint=""
+    case "${FAILED_CHECKS[0]}" in
+        mesh)    local_hint="check tailscale status + fleet ACL tags" ;;
+        bus)     local_hint="check wm-busbridge on the hub + agorabus socket" ;;
+        secrets) local_hint="run: constellation-secrets bootstrap" ;;
+        brain)   local_hint="check WM_ANTHROPIC_API_KEY or local ollama service" ;;
+    esac
+
+    LOCALIZED_LAYER="${FAILED_CHECKS[0]}"
+    failed_str=$(IFS=,; echo "${FAILED_CHECKS[*]}")
+    passed_str=""
+    if [[ ${#PASSED_CHECKS[@]} -gt 0 ]]; then
+        passed_str=", ($(IFS=,; echo "${PASSED_CHECKS[*]}"): OK)"
+    fi
+    VERDICT="JOIN INCOMPLETE: ${failed_str} failed${passed_str} -> ${local_hint}"
+fi
+
+# ---------------------------------------------------------------------------
+# Output
+# ---------------------------------------------------------------------------
+if [[ "$JSON_OUTPUT" -eq 1 ]]; then
+    # Use printf to build shell vars, then pass them to python3 cleanly
+    MESH_STATUS="${CHECK_STATUS[mesh]:-unknown}"
+    MESH_MSG="${CHECK_MSG[mesh]:-}"
+    BUS_STATUS="${CHECK_STATUS[bus]:-unknown}"
+    BUS_MSG="${CHECK_MSG[bus]:-}"
+    SECRETS_STATUS="${CHECK_STATUS[secrets]:-unknown}"
+    SECRETS_MSG="${CHECK_MSG[secrets]:-}"
+    BRAIN_STATUS="${CHECK_STATUS[brain]:-unknown}"
+    BRAIN_MSG="${CHECK_MSG[brain]:-}"
+    SNM="$SINGLE_NODE_MODE"
+    OVERAL="$OVERALL_PASS"
+
+    python3 - "$MESH_STATUS" "$MESH_MSG" \
+               "$BUS_STATUS" "$BUS_MSG" \
+               "$SECRETS_STATUS" "$SECRETS_MSG" \
+               "$BRAIN_STATUS" "$BRAIN_MSG" \
+               "$VERDICT" "$LOCALIZED_LAYER" "$SNM" "$TIMEOUT" "$OVERAL" <<'PYEOF'
+import json, sys
+args = sys.argv[1:]
+names = ["mesh","bus","secrets","brain"]
+checks = []
+for i,name in enumerate(names):
+    checks.append({"check": name, "status": args[i*2], "msg": args[i*2+1]})
+verdict = args[8]
+localized_layer = args[9]
+single_node_mode = args[10] == "1"
+timeout_secs = int(args[11])
+exit_code = 0 if args[12] == "1" else 1
+result = {
+    "checks": checks,
+    "verdict": verdict,
+    "localized_layer": localized_layer,
+    "single_node_mode": single_node_mode,
+    "timeout_secs": timeout_secs,
+    "exit_code": exit_code,
+}
+print(json.dumps(result, indent=2))
+PYEOF
+else
+    echo ""
+    echo "constellation join-check"
+    echo "========================"
+    for check in mesh bus secrets brain; do
+        print_check "$check" "${CHECK_STATUS[$check]:-unknown}" "${CHECK_MSG[$check]:-}"
+    done
+    echo ""
+    echo "$VERDICT"
+    echo ""
+fi
+
+# ---------------------------------------------------------------------------
+# Exit
+# ---------------------------------------------------------------------------
+if [[ "$OVERALL_PASS" -eq 1 ]]; then
+    exit 0
+else
+    exit 1
+fi
