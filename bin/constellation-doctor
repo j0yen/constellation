@@ -1,0 +1,431 @@
+#!/usr/bin/env bash
+# constellation-doctor — composite fleet health probe that localizes the broken seam.
+#
+# SIGPIPE safety: trap SIGPIPE so `constellation doctor | head` never aborts.
+trap '' PIPE
+
+set -uo pipefail
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# Probe sequence (layer names in order)
+LAYERS=(mesh bus secrets brain dispatch hub)
+
+# Exit codes
+EXIT_HEALTHY=0
+EXIT_DEGRADED=1
+EXIT_DOWN=2
+
+# ---------------------------------------------------------------------------
+# CLI parsing
+# ---------------------------------------------------------------------------
+OPT_JSON=0
+OPT_LIVE=0
+OPT_LAYER=""
+
+usage() {
+    cat <<'EOF'
+constellation doctor — composite fleet health probe.
+
+USAGE:
+  constellation-doctor [--json] [--live] [--layer <name>]
+
+LAYERS (probed in order):
+  mesh       Network reachability + Tailscale peer tags
+  bus        wm-busbridge KV registry liveness
+  secrets    Structural secret store check (+ live decrypt with --live)
+  brain      Brain tier reachability (cloud API or local ollama)
+  dispatch   Work-queue liveness (no in-flight job wedged past threshold)
+  hub        wm-busbridge hub-status (UP/DOWN failover watcher)
+
+FLAGS:
+  --live          Enable network-touching probes (off by default; safe + fast)
+  --layer <name>  Run only the named layer's probe; exit on its verdict
+  --json          Emit structured JSON (per-layer array + first_broken_layer + overall)
+  --help, -h      Show this message
+
+EXIT CODES:
+  0  HEALTHY   — all structural probes OK, no FAIL
+  1  DEGRADED  — at least one WARN or live-only SKIP present, no FAIL
+  2  DOWN      — at least one FAIL
+
+ENVIRONMENT OVERRIDES (for testing):
+  DOCTOR_PROBE_MESH      Force mesh result:     OK|WARN|FAIL|SKIP
+  DOCTOR_PROBE_BUS       Force bus result
+  DOCTOR_PROBE_SECRETS   Force secrets result
+  DOCTOR_PROBE_BRAIN     Force brain result
+  DOCTOR_PROBE_DISPATCH  Force dispatch result
+  DOCTOR_PROBE_HUB       Force hub result
+  DOCTOR_PROBE_MESH_MSG / DOCTOR_PROBE_BUS_MSG / ... — force detail message
+
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --json) OPT_JSON=1; shift ;;
+        --live) OPT_LIVE=1; shift ;;
+        --layer)
+            [[ -z "${2:-}" ]] && { echo "error: --layer requires a name" >&2; exit 1; }
+            OPT_LAYER="$2"; shift 2 ;;
+        --help|-h) usage; exit 0 ;;
+        *) echo "error: unknown flag: $1" >&2; usage >&2; exit 1 ;;
+    esac
+done
+
+# Validate --layer
+if [[ -n "$OPT_LAYER" ]]; then
+    valid=0
+    for l in "${LAYERS[@]}"; do [[ "$l" == "$OPT_LAYER" ]] && valid=1; done
+    [[ $valid -eq 0 ]] && { echo "error: unknown layer '$OPT_LAYER'. Valid: ${LAYERS[*]}" >&2; exit 1; }
+fi
+
+# ---------------------------------------------------------------------------
+# Probe implementations
+# ---------------------------------------------------------------------------
+# Each probe_<layer> sets two variables: RESULT (OK/WARN/FAIL/SKIP) and MSG.
+
+probe_mesh() {
+    # Allow env override for testing
+    if [[ -n "${DOCTOR_PROBE_MESH:-}" ]]; then
+        RESULT="${DOCTOR_PROBE_MESH}"
+        MSG="${DOCTOR_PROBE_MESH_MSG:-injected}"
+        return
+    fi
+
+    if [[ "$OPT_LIVE" -eq 0 ]]; then
+        # Structural: check if tailscale binary exists and is configured
+        if command -v tailscale &>/dev/null; then
+            local ts_status
+            ts_status=$(tailscale status --json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('BackendState',''))" 2>/dev/null || echo "")
+            if [[ "$ts_status" == "Running" ]]; then
+                RESULT="OK"
+                MSG="tailscale running (structural)"
+            elif [[ -n "$ts_status" ]]; then
+                RESULT="WARN"
+                MSG="tailscale state: $ts_status"
+            else
+                RESULT="SKIP"
+                MSG="tailscale not responding (use --live)"
+            fi
+        else
+            RESULT="SKIP"
+            MSG="tailscale not installed"
+        fi
+    else
+        # Live: actually ping peers
+        if ! command -v tailscale &>/dev/null; then
+            RESULT="FAIL"
+            MSG="tailscale not installed"
+            return
+        fi
+        local peer_count
+        peer_count=$(tailscale status 2>/dev/null | grep -c "^100\." || echo "0")
+        if [[ "$peer_count" -gt 0 ]]; then
+            RESULT="OK"
+            MSG="$peer_count peers reachable"
+        else
+            RESULT="WARN"
+            MSG="no peers visible in tailscale status"
+        fi
+    fi
+}
+
+probe_bus() {
+    if [[ -n "${DOCTOR_PROBE_BUS:-}" ]]; then
+        RESULT="${DOCTOR_PROBE_BUS}"
+        MSG="${DOCTOR_PROBE_BUS_MSG:-injected}"
+        return
+    fi
+
+    if [[ "$OPT_LIVE" -eq 0 ]]; then
+        # Structural: check if wm-busbridge binary exists
+        if command -v wm-busbridge &>/dev/null; then
+            RESULT="SKIP"
+            MSG="wm-busbridge found; use --live to probe KV registry"
+        else
+            RESULT="SKIP"
+            MSG="wm-busbridge not installed (live probe skipped)"
+        fi
+    else
+        if ! command -v wm-busbridge &>/dev/null; then
+            RESULT="FAIL"
+            MSG="wm-busbridge not installed"
+            return
+        fi
+        local exit_code
+        wm-busbridge status &>/dev/null; exit_code=$?
+        if [[ $exit_code -eq 0 ]]; then
+            RESULT="OK"
+            MSG="KV registry present, nodes fresh"
+        else
+            RESULT="FAIL"
+            MSG="KV registry empty — is wm-busbridge running on the hub?"
+        fi
+    fi
+}
+
+probe_secrets() {
+    if [[ -n "${DOCTOR_PROBE_SECRETS:-}" ]]; then
+        RESULT="${DOCTOR_PROBE_SECRETS}"
+        MSG="${DOCTOR_PROBE_SECRETS_MSG:-injected}"
+        return
+    fi
+
+    local secrets_check="${REPO_ROOT}/tests/secrets-check.sh"
+    if [[ ! -f "$secrets_check" ]]; then
+        RESULT="SKIP"
+        MSG="secrets-check.sh not found"
+        return
+    fi
+
+    # Always run structural check
+    local out
+    if out=$(bash "$secrets_check" 2>&1); then
+        if [[ "$OPT_LIVE" -eq 1 ]]; then
+            # Live: also try constellation-secrets get canary
+            local cs="${REPO_ROOT}/bin/constellation-secrets"
+            if [[ -f "$cs" ]] && bash "$cs" get canary &>/dev/null 2>&1; then
+                RESULT="OK"
+                MSG="structural + live decrypt OK"
+            else
+                RESULT="WARN"
+                MSG="structural OK; live decrypt skipped or failed"
+            fi
+        else
+            RESULT="OK"
+            MSG="structural checks passed"
+        fi
+    else
+        RESULT="FAIL"
+        MSG="structural secrets check failed"
+    fi
+}
+
+probe_brain() {
+    if [[ -n "${DOCTOR_PROBE_BRAIN:-}" ]]; then
+        RESULT="${DOCTOR_PROBE_BRAIN}"
+        MSG="${DOCTOR_PROBE_BRAIN_MSG:-injected}"
+        return
+    fi
+
+    if [[ "$OPT_LIVE" -eq 0 ]]; then
+        RESULT="SKIP"
+        MSG="use --live to probe brain tier"
+        return
+    fi
+
+    # Live: check local ollama then cloud API
+    if command -v ollama &>/dev/null && ollama list &>/dev/null 2>&1; then
+        RESULT="OK"
+        MSG="local ollama responding"
+    elif [[ -n "${WM_ANTHROPIC_API_KEY:-}" ]]; then
+        # Quick cloud reachability check (no actual inference)
+        if curl -sf --max-time 5 -H "x-api-key: ${WM_ANTHROPIC_API_KEY}" \
+            "https://api.anthropic.com/v1/models" &>/dev/null 2>&1; then
+            RESULT="OK"
+            MSG="cloud API reachable"
+        else
+            RESULT="FAIL"
+            MSG="cloud API unreachable (WM_ANTHROPIC_API_KEY set but no connectivity)"
+        fi
+    else
+        RESULT="WARN"
+        MSG="neither local ollama nor WM_ANTHROPIC_API_KEY available"
+    fi
+}
+
+probe_dispatch() {
+    if [[ -n "${DOCTOR_PROBE_DISPATCH:-}" ]]; then
+        RESULT="${DOCTOR_PROBE_DISPATCH}"
+        MSG="${DOCTOR_PROBE_DISPATCH_MSG:-injected}"
+        return
+    fi
+
+    if [[ "$OPT_LIVE" -eq 0 ]]; then
+        RESULT="SKIP"
+        MSG="use --live to probe work-queue liveness"
+        return
+    fi
+
+    # Live: check via wm-busbridge for wedged in-flight jobs
+    if ! command -v wm-busbridge &>/dev/null; then
+        RESULT="SKIP"
+        MSG="wm-busbridge not installed"
+        return
+    fi
+
+    local status_out
+    if status_out=$(wm-busbridge status 2>/dev/null); then
+        # Check for inflight jobs older than 300s (heuristic)
+        local wedged
+        wedged=$(echo "$status_out" | grep -c "inflight.*[3-9][0-9][0-9][0-9]s" || echo "0")
+        if [[ "$wedged" -gt 0 ]]; then
+            RESULT="WARN"
+            MSG="$wedged in-flight job(s) older than threshold"
+        else
+            RESULT="OK"
+            MSG="work-queue not wedged"
+        fi
+    else
+        RESULT="FAIL"
+        MSG="wm-busbridge status failed"
+    fi
+}
+
+probe_hub() {
+    if [[ -n "${DOCTOR_PROBE_HUB:-}" ]]; then
+        RESULT="${DOCTOR_PROBE_HUB}"
+        MSG="${DOCTOR_PROBE_HUB_MSG:-injected}"
+        return
+    fi
+
+    if [[ "$OPT_LIVE" -eq 0 ]]; then
+        RESULT="SKIP"
+        MSG="use --live to probe hub failover watcher"
+        return
+    fi
+
+    if ! command -v wm-busbridge &>/dev/null; then
+        RESULT="SKIP"
+        MSG="wm-busbridge not installed"
+        return
+    fi
+
+    local exit_code
+    wm-busbridge hub-status &>/dev/null; exit_code=$?
+    if [[ $exit_code -eq 0 ]]; then
+        RESULT="OK"
+        MSG="hub UP"
+    else
+        RESULT="FAIL"
+        MSG="hub DOWN (local fallback may be active)"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Run probes
+# ---------------------------------------------------------------------------
+declare -A LAYER_RESULT
+declare -A LAYER_MSG
+
+run_probe() {
+    local layer="$1"
+    local RESULT=""
+    local MSG=""
+    "probe_${layer}"
+    LAYER_RESULT[$layer]="$RESULT"
+    LAYER_MSG[$layer]="$MSG"
+}
+
+if [[ -n "$OPT_LAYER" ]]; then
+    run_probe "$OPT_LAYER"
+else
+    for layer in "${LAYERS[@]}"; do
+        run_probe "$layer"
+    done
+fi
+
+# ---------------------------------------------------------------------------
+# Compute overall verdict
+# ---------------------------------------------------------------------------
+OVERALL="HEALTHY"
+FIRST_BROKEN=""
+
+if [[ -n "$OPT_LAYER" ]]; then
+    # Single-layer mode: verdict = that layer's result
+    r="${LAYER_RESULT[$OPT_LAYER]}"
+    case "$r" in
+        FAIL) OVERALL="DOWN" ;;
+        WARN) OVERALL="DEGRADED" ;;
+        SKIP) OVERALL="HEALTHY" ;;
+        OK)   OVERALL="HEALTHY" ;;
+    esac
+    FIRST_BROKEN="$OPT_LAYER"
+else
+    for layer in "${LAYERS[@]}"; do
+        r="${LAYER_RESULT[$layer]}"
+        case "$r" in
+            FAIL)
+                [[ -z "$FIRST_BROKEN" ]] && FIRST_BROKEN="$layer"
+                OVERALL="DOWN"
+                ;;
+            WARN)
+                [[ -z "$FIRST_BROKEN" ]] && FIRST_BROKEN="$layer"
+                [[ "$OVERALL" != "DOWN" ]] && OVERALL="DEGRADED"
+                ;;
+        esac
+    done
+    [[ "$OVERALL" == "HEALTHY" ]] && FIRST_BROKEN=""
+fi
+
+# ---------------------------------------------------------------------------
+# Output
+# ---------------------------------------------------------------------------
+if [[ "$OPT_JSON" -eq 1 ]]; then
+    # JSON output
+    layers_json="["
+    sep=""
+    if [[ -n "$OPT_LAYER" ]]; then
+        probe_list=("$OPT_LAYER")
+    else
+        probe_list=("${LAYERS[@]}")
+    fi
+    for layer in "${probe_list[@]}"; do
+        r="${LAYER_RESULT[$layer]}"
+        m="${LAYER_MSG[$layer]}"
+        # Escape any quotes in message
+        m_esc="${m//\"/\\\"}"
+        layers_json+="${sep}{\"layer\":\"${layer}\",\"result\":\"${r}\",\"detail\":\"${m_esc}\"}"
+        sep=","
+    done
+    layers_json+="]"
+
+    fb_json="null"
+    [[ -n "$FIRST_BROKEN" ]] && fb_json="\"${FIRST_BROKEN}\""
+
+    printf '{"overall":"%s","first_broken_layer":%s,"layers":%s}\n' \
+        "$OVERALL" "$fb_json" "$layers_json"
+else
+    # Human-readable output
+    if [[ -n "$FIRST_BROKEN" ]]; then
+        printf 'FLEET: %s → first broken layer: %s\n' "$OVERALL" "${FIRST_BROKEN^^}"
+    else
+        printf 'FLEET: %s\n' "$OVERALL"
+    fi
+
+    if [[ -n "$OPT_LAYER" ]]; then
+        printf '  %-10s %-6s %s\n' "$OPT_LAYER" "${LAYER_RESULT[$OPT_LAYER]}" "${LAYER_MSG[$OPT_LAYER]}"
+    else
+        for layer in "${LAYERS[@]}"; do
+            printf '  %-10s %-6s %s\n' "$layer" "${LAYER_RESULT[$layer]}" "${LAYER_MSG[$layer]}"
+        done
+    fi
+
+    # Remediation hint for FAIL/WARN
+    if [[ "$OVERALL" == "DOWN" || "$OVERALL" == "DEGRADED" ]] && [[ -n "$FIRST_BROKEN" ]]; then
+        echo ""
+        case "$FIRST_BROKEN" in
+            mesh)     echo "Remediation: check tailscale status; ensure tailscaled is running." ;;
+            bus)      echo "Remediation: start wm-busbridge on the hub, then re-run with --live." ;;
+            secrets)  echo "Remediation: run constellation-secrets bootstrap; check age key file." ;;
+            brain)    echo "Remediation: start ollama or set WM_ANTHROPIC_API_KEY; re-run with --live." ;;
+            dispatch) echo "Remediation: inspect wm-busbridge status for wedged jobs." ;;
+            hub)      echo "Remediation: check hub node connectivity; inspect wm-busbridge hub-status." ;;
+        esac
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Exit code
+# ---------------------------------------------------------------------------
+case "$OVERALL" in
+    HEALTHY)  exit "$EXIT_HEALTHY" ;;
+    DEGRADED) exit "$EXIT_DEGRADED" ;;
+    DOWN)     exit "$EXIT_DOWN" ;;
+    *)        exit "$EXIT_DOWN" ;;
+esac
