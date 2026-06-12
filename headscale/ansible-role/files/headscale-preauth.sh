@@ -59,11 +59,19 @@ fi
 
 # ── Binary checks ─────────────────────────────────────────────────────────────
 if ! command -v "$HEADSCALE_BIN" &>/dev/null; then
-    die "headscale binary not found: $HEADSCALE_BIN"
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "WARN: headscale binary not found at: $HEADSCALE_BIN (dry-run continues)"
+    else
+        die "headscale binary not found: $HEADSCALE_BIN"
+    fi
 fi
 
 if ! command -v pass &>/dev/null; then
-    die "pass (password-store) not found; install it first"
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "WARN: pass (password-store) not found (dry-run continues)"
+    else
+        die "pass (password-store) not found; install it first"
+    fi
 fi
 
 # ── Build headscale command ───────────────────────────────────────────────────
