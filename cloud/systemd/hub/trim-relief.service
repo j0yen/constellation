@@ -1,0 +1,13 @@
+[Unit]
+Description=trim relief pass (memory/swap compaction)
+After=network.target
+
+[Service]
+ExecCondition=wm-node role hub
+Type=oneshot
+ExecStart=%h/.local/bin/trim relief --no-dry-run
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=timers.target

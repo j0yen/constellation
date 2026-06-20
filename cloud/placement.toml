@@ -1,0 +1,45 @@
+# Timer placement: fleet = run on hub, node-local = run on every node
+#
+# fleet    — timer is node-agnostic; relocate to the always-on hub so it fires
+#            regardless of whether the laptop lid is closed.
+# node-local — timer is bound to a specific node's resources/environment and
+#              must NOT be moved to the hub.
+#
+# Consumed by: wm-node should-run <daemon>
+# See: cloud/docs/timer-placement.md for rationale and how to add new timers.
+
+[timers]
+
+# --- Fleet timers (will be relocated to hub) ---
+
+# Daily/weekly session management — node-agnostic, fires once across fleet
+roundtable = "hub"
+roundtable-bind = "hub"
+
+# Claude self-management — should fire on schedule, not "when laptop is on at 3am"
+claude-self-review = "hub"
+claude-review-due = "hub"
+
+# Binary adoption pass — manages the fleet's ~/.local/bin across all nodes
+adopt-cron = "hub"
+
+# Git push-debt drain — pushes accumulated commits for the whole fleet
+consign-drain = "hub"
+
+# Git hygiene — node-agnostic housekeeping
+claude-chaff = "hub"
+
+# Memory/swap compaction — hub runs lean and doesn't need it, but it fires
+# once per fleet rather than per-node; hub is the canonical "fire once" location
+trim-relief = "hub"
+
+# Disk SLO guard — hub has its own disk; monitors once across fleet
+ballast-guard = "hub"
+
+# --- Node-local timers (stay on every node) ---
+
+# Kills stale Hetzner burst-build servers — only meaningful where builds launch
+cloudbuild-watchdog = "node-local"
+
+# Reaps orphaned bpftrace tracers (root-owned) — local kernel state, can't move
+ctrace-reap = "node-local"
