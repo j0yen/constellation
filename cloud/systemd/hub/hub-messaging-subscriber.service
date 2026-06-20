@@ -1,0 +1,49 @@
+[Unit]
+Description=Hub messaging bus subscriber (homeward owner-notify + relay send)
+Documentation=https://github.com/j0yen/constellation/blob/main/cloud/docs/messaging-architecture.md
+After=agorabus.service network-online.target
+Wants=agorabus.service
+
+[Service]
+Type=simple
+
+# Guard: only run on hub-role nodes. Exits 0 to allow start; non-zero to skip.
+# wm-node reads the node role from /etc/wintermute/node-role (or equivalent).
+ExecCondition=/usr/local/bin/wm-node role hub
+
+# Credentials for outbound sends — provisioned via constellation secrets role.
+# See cloud/secrets/hub-messaging.md for provisioning steps.
+EnvironmentFile=%h/.config/wintermute/secrets/messaging.env
+
+# NATS bus credentials
+EnvironmentFile=-%h/.config/wintermute/nats.env
+
+# The subscriber listens for wm.homeward.match (and wm.homeward.reminder)
+# events on the fleet NATS bus. For each event it:
+#   1. Extracts the message_id field
+#   2. Runs message-dedup.sh to guard against double-send
+#   3. If new, calls the homeward-reportd send path
+#
+# The subscribe-and-send subcommand is provided by homeward-reportd >= 0.4.0
+# (PRD-homeward-relay-send). The dedup helper is in
+# cloud/scripts/message-dedup.sh (installed to ~/.local/bin/message-dedup).
+ExecStart=/home/jsy/.local/bin/homeward-reportd subscribe-and-send \
+    --dedup-cmd=/home/jsy/.local/bin/message-dedup \
+    --subjects=wm.homeward.match,wm.homeward.reminder
+
+Restart=on-failure
+RestartSec=10s
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hub-messaging-subscriber
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/state/homeward
+
+[Install]
+WantedBy=wintermute.target
