@@ -1,7 +1,7 @@
 # cloud/placement.toml — constellation daemon placement classification
 #
 # Values:
-#   "hub"        — always-on fleet hub (Hetzner CAX21, ARM)
+#   "hub"        — always-on fleet hub (Hetzner CPX22, x86_64 AMD EPYC)
 #   "node-local" — every node runs its own instance
 #   (unset)      — placement TBD / out of scope
 #
@@ -28,6 +28,10 @@ ballast-guard = "hub"
 cloudbuild-watchdog = "node-local"  # kills stale Hetzner burst servers
 ctrace-reap = "node-local"          # reaps local bpftrace tracers
 
+# Aggregate lists (consumed by carbon-reminders-cloud classification gate)
+fleet      = ["claude-self-review", "claude-review-due", "roundtable", "roundtable-bind", "adopt-cron", "consign-drain", "claude-chaff", "trim-relief", "ballast-guard"]
+node_local = ["cloudbuild-watchdog", "ctrace-reap"]
+
 # ---------------------------------------------------------------------------
 # Subscriber daemons
 # ---------------------------------------------------------------------------
@@ -44,3 +48,17 @@ wm-tether    = "node-local"  # fleet link supervisor
 
 # Out of scope
 # recalld = ???  # canonical agentic memory; placement TBD
+
+# ---------------------------------------------------------------------------
+# Subscribers (canonical classification used by carbon-subscribers-cloud PRD)
+# ---------------------------------------------------------------------------
+[subscribers]
+
+# Hub-bound fleet subscribers (run 24/7 on hub; not laptop-local)
+hub = ["homeward-ingest", "homeward-report", "homeward-embed"]
+
+# Node-local subscribers (one per node, topology constraint)
+node_local = ["wm-busbridge", "wm-tether"]
+
+# Out of scope — placement TBD
+unset = ["recalld"]
