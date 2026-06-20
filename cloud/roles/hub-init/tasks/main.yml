@@ -1,0 +1,151 @@
+---
+# hub-init role tasks — first-boot hardening and identity setup for the Hetzner hub.
+#
+# This role is a lightweight complement to the heavier `cloud` role. It runs
+# BEFORE the full `cloud` provisioning to:
+#   1. Harden SSH (key-only auth, disable root login)
+#   2. Enable systemd --user linger for the jsy user
+#   3. Write node.toml for constellation node identity (role=hub)
+#   4. Install minimal runtime deps (git, curl, jq)
+#   5. Ensure ~/.local/bin is on PATH
+#
+# Usage:
+#   ansible-playbook -i ansible/inventory/hosts ansible/site.yml \
+#     --limit hub --tags hub-init
+#
+# Precondition: SSH key-based access must already work (run hub-bootstrap.sh first).
+
+# ---------------------------------------------------------------------------
+# 1. Harden SSH
+# ---------------------------------------------------------------------------
+- name: Disable SSH password authentication
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?PasswordAuthentication'
+    line: 'PasswordAuthentication no'
+    state: present
+    backup: true
+  become: true
+  notify: Restart sshd
+
+- name: Disable SSH root login
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?PermitRootLogin'
+    line: 'PermitRootLogin no'
+    state: present
+  become: true
+  notify: Restart sshd
+
+- name: Ensure sshd is enabled and running
+  ansible.builtin.systemd:
+    name: sshd
+    enabled: true
+    state: started
+  become: true
+
+# ---------------------------------------------------------------------------
+# 2. systemd --user linger
+# ---------------------------------------------------------------------------
+- name: Enable systemd --user linger for jsy
+  ansible.builtin.command: loginctl enable-linger jsy
+  changed_when: false
+  become: true
+
+- name: Verify linger is enabled
+  ansible.builtin.command: loginctl show-user jsy -p Linger
+  register: linger_check
+  changed_when: false
+  failed_when: "'Linger=yes' not in linger_check.stdout"
+
+# ---------------------------------------------------------------------------
+# 3. Node identity — node.toml (PRD-carbon-node-identity)
+# ---------------------------------------------------------------------------
+- name: Ensure ~/.config/constellation directory exists
+  ansible.builtin.file:
+    path: "{{ ansible_env.HOME }}/.config/constellation"
+    state: directory
+    mode: "0750"
+
+- name: Write node.toml for hub identity
+  ansible.builtin.copy:
+    dest: "{{ ansible_env.HOME }}/.config/constellation/node.toml"
+    content: |
+      # constellation node identity — written by hub-init Ansible role
+      name = "hub"
+      roles = ["hub"]
+      tailscale_ip = "100.66.158.49"
+      arch = "aarch64"
+      os = "linux"
+      [nats]
+      mode = "hub"
+      listen_port = 4222
+      leafnode_port = 7422
+      jetstream_domain = "hub"
+    mode: "0640"
+    backup: true
+
+# ---------------------------------------------------------------------------
+# 4. Minimal runtime dependencies
+# ---------------------------------------------------------------------------
+- name: Install minimal runtime packages
+  community.general.pacman:
+    name:
+      - git
+      - curl
+      - jq
+      - wget
+      - tmux
+    state: present
+    update_cache: true
+  become: true
+
+# ---------------------------------------------------------------------------
+# 5. Ensure ~/.local/bin is on PATH
+# ---------------------------------------------------------------------------
+- name: Ensure ~/.local/bin directory exists
+  ansible.builtin.file:
+    path: "{{ ansible_env.HOME }}/.local/bin"
+    state: directory
+    mode: "0755"
+
+- name: Add ~/.local/bin to PATH in ~/.bashrc (idempotent)
+  ansible.builtin.lineinfile:
+    path: "{{ ansible_env.HOME }}/.bashrc"
+    line: 'export PATH="${HOME}/.local/bin:${PATH}"'
+    regexp: 'export PATH="\$\{HOME\}/.local/bin'
+    state: present
+    create: true
+    mode: "0644"
+
+- name: Add ~/.local/bin to PATH in ~/.bash_profile (idempotent)
+  ansible.builtin.lineinfile:
+    path: "{{ ansible_env.HOME }}/.bash_profile"
+    line: '[[ -f ~/.bashrc ]] && source ~/.bashrc'
+    state: present
+    create: true
+    mode: "0644"
+
+# ---------------------------------------------------------------------------
+# 6. Rust/Cargo environment (for native ARM builds)
+# ---------------------------------------------------------------------------
+- name: Check if rustup is installed
+  ansible.builtin.stat:
+    path: "{{ ansible_env.HOME }}/.cargo/bin/rustup"
+  register: rustup_stat
+
+- name: Install rustup (if missing)
+  ansible.builtin.shell: |
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
+  args:
+    creates: "{{ ansible_env.HOME }}/.cargo/bin/rustup"
+  when: not rustup_stat.stat.exists
+
+- name: Add cargo bin to PATH in ~/.bashrc (idempotent)
+  ansible.builtin.lineinfile:
+    path: "{{ ansible_env.HOME }}/.bashrc"
+    line: 'export PATH="${HOME}/.cargo/bin:${PATH}"'
+    regexp: 'export PATH="\$\{HOME\}/.cargo/bin'
+    state: present
+    create: true
+    mode: "0644"
