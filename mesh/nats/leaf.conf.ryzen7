@@ -1,0 +1,18 @@
+# constellation-bus: NATS leaf — ryzen-work
+# Updated to connect to local hub (nats-hub.service) via 127.0.0.1:7422
+server_name: wm-leaf-ryzen7
+
+jetstream {
+  domain: ryzen7
+  store_dir: /home/jsy/.local/share/nats/jetstream
+}
+
+listen: "127.0.0.1:4222"
+
+leafnodes {
+  remotes [
+    {
+      url: "nats://127.0.0.1:7422"
+    }
+  ]
+}

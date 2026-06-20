@@ -1,0 +1,11 @@
+[Unit]
+Description=NATS hub — constellation fleet (ryzen-work)
+After=network.target
+
+[Service]
+ExecStart=%h/.local/bin/nats-server -c %h/.config/nats/hub.conf
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
