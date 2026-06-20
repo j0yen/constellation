@@ -13,6 +13,7 @@
 
 [laptop]
 # wintermute-laptop  ansible_host=127.0.0.1  ansible_user=jsy  ansible_connection=local
+wintermute  ansible_host=100.114.123.20  ansible_user=jsy  ansible_ssh_private_key_file=~/.ssh/wintermute-build
 
 [desktop]
 
