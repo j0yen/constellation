@@ -1,0 +1,10 @@
+[Unit]
+Description=consign drain — push git push-debt for the fleet
+After=network.target
+
+[Service]
+ExecCondition=wm-node role hub
+Type=oneshot
+ExecStart=/bin/bash %h/wintermute/consign/contrib/consign-cron.sh
+StandardOutput=journal
+StandardError=journal

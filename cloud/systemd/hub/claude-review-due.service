@@ -1,0 +1,7 @@
+[Unit]
+Description=Mark Claude self-review due (drops marker file for SessionStart hook)
+
+[Service]
+ExecCondition=wm-node role hub
+Type=oneshot
+ExecStart=/usr/bin/touch %h/brain/state/review-due

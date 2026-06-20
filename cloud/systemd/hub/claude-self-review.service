@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Claude Code /self-review headlessly (peon-ping muted for the run)
+
+[Service]
+ExecCondition=wm-node role hub
+Type=oneshot
+WorkingDirectory=%h
+Environment=PATH=%h/.local/bin:%h/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HOME=%h
+StandardOutput=append:%h/brain/journal/self-review-auto.log
+StandardError=append:%h/brain/journal/self-review-auto.log
+ExecStart=%h/.local/bin/claude-self-review-headless.sh
