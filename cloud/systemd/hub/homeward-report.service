@@ -8,7 +8,11 @@ After=network.target homeward-ingest.service
 Type=exec
 # Only start if this node is the hub (ExecCondition exits non-zero → unit skips cleanly)
 ExecCondition=%h/.local/bin/wm-node should-run homeward-report
+# Base service config (port, data dirs, etc.)
 EnvironmentFile=-%h/.config/homeward/homeward.env
+# Messaging credentials (relay endpoint + SMTP); optional so unit still starts
+# in dry-run mode if the file is absent.  See cloud/secrets/hub-messaging.md.
+EnvironmentFile=-%h/.config/wintermute/secrets/messaging.env
 ExecStart=%h/.local/bin/homeward-reportd serve --port ${HOMEWARD_REPORT_PORT:-8081}
 Restart=always
 RestartSec=5
