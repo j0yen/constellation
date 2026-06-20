@@ -1,8 +1,8 @@
-# ARM Build Notes — Hetzner CAX21 Hub
+# Build Notes — Hetzner CPX22 Hub
 
-The hub runs **aarch64** (ARM64). The cloudbuild burst system
-(`cloud/scripts/cloudbuild.sh`) provisions Hetzner x86_64 boxes and produces
-x86_64 binaries — these will not run on the hub.
+**The hub is x86_64 (AMD EPYC), not ARM.** This was previously documented as
+CAX21/aarch64 — confirmed incorrect on 2026-06-20. The cloudbuild burst system
+produces x86_64 binaries which run on the hub without any cross-compilation.
 
 ---
 

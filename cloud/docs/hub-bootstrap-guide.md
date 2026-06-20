@@ -1,6 +1,6 @@
 # Hub Bootstrap Guide
 
-Step-by-step instructions to get SSH access to the Hetzner CAX21 hub
+Step-by-step instructions to get SSH access to the Hetzner CPX22 hub (x86_64, AMD EPYC)
 (`100.66.158.49`) and bring it into the constellation.
 
 ## Background

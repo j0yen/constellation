@@ -7,8 +7,8 @@ anchor the Tailscale mesh, and provide an offline-fallback brain.
 
 ```
                      ┌──────────────────────────────────┐
-                     │  Hetzner CAX21 (hub)  ~€8/mo     │
-                     │  ARM, 4vCPU, 8GB RAM             │
+                     │  Hetzner CPX22 (hub)  ~€8/mo     │
+                     │  x86_64 (AMD EPYC), 3vCPU, 4GB  │
                      │                                  │
   laptop (nomad) ────┤  nats-server :7422 (leafnode TLS)│
   desktop (forge) ───┤  tailscaled  (exit node)         │
