@@ -31,33 +31,36 @@ See `cloud/placement.toml`:
 1. **Hub SSH access** — `ssh hub` must work (see `carbon-hub-access` PRD).
 2. **wm-node installed on hub** — provides `wm-node should-run <daemon>` used
    in `ExecCondition` guards.
-3. **ARM binaries** — see "ARM build options" below.
+3. **Binaries on hub** — hub is x86_64 (Hetzner CPX22, AMD EPYC); laptop
+   binaries are also x86_64 — direct scp works (no cross-compile needed).
 4. **uv installed on hub** — for the homeward-embed Python sidecar.
 
-## ARM build options
+## Binary assessment (2026-06-20)
 
-The hub is ARM64 (aarch64). Two paths for homeward-ingest and homeward-report:
+Hub architecture: **x86_64** (Hetzner CPX22, AMD EPYC) — NOT ARM as
+previously documented. This simplifies deployment significantly.
 
-### Option A — cross-compile on laptop (preferred for CI)
+Laptop binaries (all x86_64 ELF, dynamically linked against glibc):
+- `~/.local/bin/homeward-ingestd` — ELF 64-bit x86-64, glibc ABI
+- `~/.local/bin/homeward-reportd` — ELF 64-bit x86-64, glibc ABI
+- `~/.local/bin/homeward` (CLI) — ELF 64-bit x86-64, glibc ABI
+- `~/.local/bin/homeward-match` — ELF 64-bit x86-64, glibc ABI
+
+**These can be scp'd directly to the hub.** The hub runs a standard Debian/Ubuntu
+userland with glibc, so dynamically-linked binaries from this Arch laptop will
+work provided glibc version is compatible (hub glibc ≥ laptop build target).
+
+### Direct binary copy (x86_64 to x86_64)
 
 ```bash
-# Install cross-compile toolchain (Arch)
-sudo pacman -S aarch64-linux-gnu-gcc
-
-# Add target
-rustup target add aarch64-unknown-linux-gnu
-
-# Build
-cargo build --release --target aarch64-unknown-linux-gnu \
-    -p homeward-ingest -p homeward-report
-
-# Copy to hub
-rsync target/aarch64-unknown-linux-gnu/release/homeward-ingestd \
-      target/aarch64-unknown-linux-gnu/release/homeward-reportd \
-      hub:~/.local/bin/
+scp ~/.local/bin/homeward-ingestd hub:~/.local/bin/homeward-ingestd
+scp ~/.local/bin/homeward-reportd hub:~/.local/bin/homeward-reportd
+# Verify
+ssh hub "~/.local/bin/homeward-reportd --version 2>/dev/null || \
+          ~/.local/bin/homeward-reportd --help 2>&1 | head -3"
 ```
 
-### Option B — native build on hub (simpler, no cross toolchain)
+### Fallback — native hub build (if glibc incompatibility)
 
 ```bash
 ssh hub
