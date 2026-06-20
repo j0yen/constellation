@@ -1,0 +1,32 @@
+# cloud/placement.toml — constellation daemon placement classification
+#
+# Each key is the daemon slug (== systemd unit name without .service).
+# Values:
+#   "hub"        — always-on fleet hub (Hetzner CAX21 / Oracle spare)
+#   "node-local" — every node that joins the fleet runs its own instance
+#   (unset)      — placement TBD / out of scope
+
+# ---------------------------------------------------------------------------
+# Timers (added by carbon-reminders-cloud)
+# ---------------------------------------------------------------------------
+
+[timers]
+# add timer placement entries here
+
+# ---------------------------------------------------------------------------
+# Subscriber daemons
+# ---------------------------------------------------------------------------
+
+[daemons]
+
+# --- hub-bound (must run 24/7; laptop sleeps kill cadence loop timing) ------
+homeward-ingest = "hub"   # AIMD cadence loop — pulls shelter data from RescueGroups/Socrata
+homeward-report = "hub"   # Owner lost-pet report API (:8081)
+homeward-embed  = "hub"   # DINOv2 FastAPI embed sidecar (Python/uv, no cross-compile needed)
+
+# --- node-local (one per node, topology constraint) -------------------------
+wm-busbridge = "node-local"  # bridges *this* node's agorabus to NATS — one per node
+wm-tether    = "node-local"  # fleet link supervisor (Tailscale/NATS) — one per node
+
+# --- out of scope -----------------------------------------------------------
+# recalld = ???  # holds canonical agentic memory; placement TBD in a future PRD

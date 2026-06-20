@@ -1,0 +1,22 @@
+[Unit]
+Description=Homeward embed sidecar (FastAPI / DINOv2) — hub instance
+Documentation=https://github.com/j0yen/homeward
+After=network.target
+# Guard: only runs on nodes where placement.toml marks homeward-embed as "hub"
+
+[Service]
+Type=exec
+# Only start if this node is the hub (ExecCondition exits non-zero → unit skips cleanly)
+ExecCondition=%h/.local/bin/wm-node should-run homeward-embed
+EnvironmentFile=-%h/.config/homeward/homeward.env
+# Python/uv project — no ARM cross-compile needed; rsync project + uv run
+WorkingDirectory=%h/wintermute/homeward/homeward/embed
+ExecStart=%h/.local/bin/uv run homeward-embed-svc
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=homeward-embed
+
+[Install]
+WantedBy=default.target
