@@ -13,7 +13,7 @@ EnvironmentFile=-%h/.config/homeward/homeward.env
 # Messaging credentials (relay endpoint + SMTP); optional so unit still starts
 # in dry-run mode if the file is absent.  See cloud/secrets/hub-messaging.md.
 EnvironmentFile=-%h/.config/wintermute/secrets/messaging.env
-ExecStart=%h/.local/bin/homeward-reportd serve --port ${HOMEWARD_REPORT_PORT:-8081}
+ExecStart=%h/.local/bin/homeward-reportd serve --port 8080
 Restart=always
 RestartSec=5
 StandardOutput=journal
