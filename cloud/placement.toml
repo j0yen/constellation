@@ -27,10 +27,13 @@ ballast-guard = "hub"
 # Node-local timers (stay on every node — bound to local resources)
 cloudbuild-watchdog = "node-local"  # kills stale Hetzner burst servers
 ctrace-reap = "node-local"          # reaps local bpftrace tracers
+# summa-commit: vault is single-node canonical state (~/Notes lives on carbon);
+# must NOT be relocated to the hub — committing a remote stale copy is wrong.
+summa-commit = "node-local"         # auto-commits ~/Notes vault 4x/day
 
 # Aggregate lists (consumed by carbon-reminders-cloud classification gate)
 fleet      = ["claude-self-review", "claude-review-due", "roundtable", "roundtable-bind", "adopt-cron", "consign-drain", "claude-chaff", "trim-relief", "ballast-guard"]
-node_local = ["cloudbuild-watchdog", "ctrace-reap"]
+node_local = ["cloudbuild-watchdog", "ctrace-reap", "summa-commit"]
 
 # ---------------------------------------------------------------------------
 # Subscriber daemons
