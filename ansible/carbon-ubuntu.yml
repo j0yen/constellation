@@ -8,11 +8,12 @@
 # PRE-STEPS (manual, once, on the fresh install):
 #   1. Install Ubuntu, user `jsy`, hostname `carbon`.
 #   2. sudo apt update && sudo apt install -y ansible git curl openssh-client
-#   3. Restore secrets FIRST (they unlock hub + GitHub):
-#        tar xzf /path/to/SECRETS-20260823.tgz -C ~     # from your USB copy
-#      (contains .ssh, .gnupg, .aws, .config/secrets, wm-burst .env, .zshenv,
-#       gh + acli auth). Then: chmod 700 ~/.ssh && chmod 600 ~/.ssh/*
-#   4. curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up
+#   3. curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up
+#   4. Hub runs Tailscale SSH (enabled 2026-08-24) — no key needed, just click
+#      the check link once:   ssh jsy@hub
+#      Then pull + restore secrets FIRST (they unlock GitHub/acli/hetzner):
+#        mkdir ~/restore && scp 'hub:backups/carbon-arch-exit/*' ~/restore/
+#        tar xzf ~/restore/SECRETS-20260823.tgz -C ~ && chmod 700 ~/.ssh && chmod 600 ~/.ssh/*
 #   5. Run this play (see tags at bottom):
 #        ansible-playbook carbon-ubuntu.yml -K
 #
