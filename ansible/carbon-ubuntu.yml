@@ -14,6 +14,11 @@
 #      Then pull + restore secrets FIRST (they unlock GitHub/acli/hetzner):
 #        mkdir ~/restore && scp 'hub:backups/carbon-arch-exit/*' ~/restore/
 #        tar xzf ~/restore/SECRETS-20260823.tgz -C ~ && chmod 700 ~/.ssh && chmod 600 ~/.ssh/*
+#        tar xzf ~/restore/SECRETS2-20260824.tgz -C ~   # gnome keyrings, gh tokens, GH recovery codes
+#      gh kept its tokens in the keyring, so log in from the exported files:
+#        gh auth login --with-token < ~/.gh-tokens/j0yen
+#        gh auth login --with-token < ~/.gh-tokens/joeyen-atscale   # becomes active; switch with gh auth switch
+#      Personal files: tar xzf ~/restore/personal-20260824.tgz -C ~  (Documents/Downloads/Notes)
 #   5. Run this play (see tags at bottom):
 #        ansible-playbook carbon-ubuntu.yml -K
 #
