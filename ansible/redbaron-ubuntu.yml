@@ -178,7 +178,7 @@
       tags: [repos]
       ansible.builtin.git:
         repo: "https://github.com/j0yen/wintermute.git"
-        dest: "{{ ansible_env.HOME }}/wintermute-git"
+        dest: "{{ ansible_env.HOME }}/wintermute"
         update: false
 
     - name: Enable user lingering (daemons run without login)
