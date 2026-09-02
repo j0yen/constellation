@@ -16,6 +16,7 @@
 wintermute  ansible_host=100.114.123.20  ansible_user=jsy  ansible_ssh_private_key_file=~/.ssh/wintermute-build
 
 [desktop]
+redbaron  ansible_host=redbaron  ansible_user=jsy
 
 [cloud]
 # Primary hub: Hetzner CAX21 — set ansible_host to the real IP after provisioning.

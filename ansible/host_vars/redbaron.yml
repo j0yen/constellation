@@ -1,0 +1,17 @@
+---
+# host_vars/redbaron.yml — i7 tower workstation with NVIDIA RTX 3080.
+#
+# This node hosts: local-gpu brain (LLM serving) + native build node.
+# NOT yet on the tailnet — enroll and confirm the MagicDNS hostname before deploying.
+
+# ---------------------------------------------------------------------------
+# Identity
+# ---------------------------------------------------------------------------
+tailscale_hostname: redbaron
+tailscale_tags: "tag:fleet,tag:desktop"
+
+# ---------------------------------------------------------------------------
+# Hardware profile — Intel i7, NVIDIA RTX 3080
+# ---------------------------------------------------------------------------
+voice_node: false
+gpu: nvidia-rtx-3080
