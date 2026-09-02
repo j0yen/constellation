@@ -53,18 +53,19 @@
     - name: Third-party apt keys
       ansible.builtin.get_url:
         url: "{{ item.url }}"
-        dest: "/etc/apt/keyrings/{{ item.name }}.asc"
+        dest: "/etc/apt/keyrings/{{ item.name }}.{{ item.ext }}"
         mode: "0644"
       loop:
-        - {name: github-cli, url: "https://cli.github.com/packages/githubcli-archive-keyring.gpg"}
-        - {name: nodesource, url: "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"}
+        # apt matches keyring filetype to extension: binary keyrings must be .gpg, armored .asc
+        - {name: github-cli, ext: gpg, url: "https://cli.github.com/packages/githubcli-archive-keyring.gpg"}
+        - {name: nodesource, ext: asc, url: "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"}
 
     - name: Third-party apt repos
       ansible.builtin.apt_repository:
         repo: "{{ item }}"
         state: present
       loop:
-        - "deb [signed-by=/etc/apt/keyrings/github-cli.asc] https://cli.github.com/packages stable main"
+        - "deb [signed-by=/etc/apt/keyrings/github-cli.gpg] https://cli.github.com/packages stable main"
         - "deb [signed-by=/etc/apt/keyrings/nodesource.asc] https://deb.nodesource.com/node_{{ node_major }}.x nodistro main"
 
     - name: Core packages (build + native-build-node baseline; no desktop/voice apps)
