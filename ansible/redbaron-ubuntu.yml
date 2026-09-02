@@ -41,8 +41,7 @@
 #     either; the driver task below just flags that one is needed before the GPU is live.
 
 - name: Redbaron Ubuntu bootstrap — system layer
-  hosts: localhost
-  connection: local
+  hosts: redbaron
   become: true
   tags: [system]
   vars:
@@ -135,8 +134,7 @@
       args: {creates: /usr/bin/nats-server}
 
 - name: Redbaron Ubuntu bootstrap — user layer
-  hosts: localhost
-  connection: local
+  hosts: redbaron
   become: false
   tags: [user]
   tasks:
