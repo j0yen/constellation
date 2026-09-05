@@ -1,0 +1,145 @@
+---
+# ubuntu-base role tasks — idempotent; safe to re-run on a converged host.
+# Ubuntu 24.04+ equivalent of the Arch `base` role: OS packages, sudo, shell,
+# PATH. Fleet identity / toolchain / dotfiles live in the `fleet-member` role.
+#
+# Task order below is load-bearing for the sudo-rs trap (see task 1) — it must
+# stay the first become-requiring task in this role, and this role must run
+# before any other role that uses `become: true` against these hosts.
+
+# ---------------------------------------------------------------------------
+# 1. sudo-rs NOPASSWD drop-in — MUST be the first become:true task anywhere in
+#    the ubuntu-base/fleet-member role set. Ubuntu 24.04+ (default on 25.10)
+#    ships sudo-rs; the RedBaron join (2026-09-01) hit `become` tasks that
+#    failed or silently no-op'd under sudo-rs without an explicit, correctly
+#    formatted NOPASSWD drop-in of their own — the cloud-image default grant
+#    (/etc/sudoers.d/90-cloud-init-users) is not a reliable substitute once
+#    sudo-rs is active. If this very first become task fails on a truly fresh
+#    box (no working passwordless sudo yet), re-run once with
+#    `bin/join <host> --ask-become-pass` to supply the password interactively;
+#    every later become task then rides this drop-in and needs no password.
+# ---------------------------------------------------------------------------
+- name: "sudo-rs trap: NOPASSWD drop-in for the constellation user (first become task)"
+  ansible.builtin.copy:
+    content: "{{ constellation_user }} ALL=(ALL) NOPASSWD:ALL\n"
+    dest: "/etc/sudoers.d/10-{{ constellation_user }}-nopasswd"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: "visudo -cf %s"
+  become: true
+  when: not (user_space | bool)
+
+- name: "user-space mode: sudo-rs NOPASSWD drop-in skipped (no become tasks run)"
+  ansible.builtin.debug:
+    msg: "--user-space: system-level sudoers task skipped by design."
+  when: user_space | bool
+
+# ---------------------------------------------------------------------------
+# 2. Apt keyrings — format matched to extension (RedBaron 2026-09-01 trap)
+# ---------------------------------------------------------------------------
+- name: "apt keyrings trap: keyrings dir"
+  ansible.builtin.file: {path: /etc/apt/keyrings, state: directory, mode: "0755"}
+  become: true
+  when: not (user_space | bool)
+
+- name: "apt keyrings trap: fetch keys with format matching their extension (binary=.gpg, armored=.asc)"
+  ansible.builtin.get_url:
+    url: "{{ item.url }}"
+    dest: "/etc/apt/keyrings/{{ item.name }}.{{ item.ext }}"
+    mode: "0644"
+  loop: "{{ ubuntu_apt_keyrings + ubuntu_extra_apt_keyrings }}"
+  loop_control: {label: "{{ item.name }}.{{ item.ext }}"}
+  become: true
+  when: not (user_space | bool)
+
+- name: Third-party apt repos
+  ansible.builtin.apt_repository:
+    repo: "{{ item }}"
+    state: present
+  loop: "{{ ubuntu_apt_repos + ubuntu_extra_apt_repos }}"
+  become: true
+  when: not (user_space | bool)
+
+# ---------------------------------------------------------------------------
+# 3. Packages
+# ---------------------------------------------------------------------------
+- name: Install packages (baseline + host_vars extras)
+  ansible.builtin.apt:
+    update_cache: true
+    name: "{{ ubuntu_base_packages + ubuntu_extra_packages }}"
+    state: present
+  become: true
+  when: not (user_space | bool)
+
+- name: Docker group membership
+  ansible.builtin.user: {name: "{{ constellation_user }}", groups: docker, append: true}
+  become: true
+  when: not (user_space | bool)
+
+- name: "GPU driver: NVIDIA (ubuntu-drivers install)"
+  ansible.builtin.command: ubuntu-drivers install
+  register: nvidia_install
+  changed_when: "'no drivers found' not in (nvidia_install.stdout | lower)"
+  failed_when: false
+  become: true
+  when: not (user_space | bool) and ubuntu_gpu_driver == "nvidia-ubuntu-drivers"
+
+- name: "GPU driver: reboot needed before it's active"
+  ansible.builtin.debug:
+    msg: >-
+      `ubuntu-drivers install` has run. A reboot is required before `nvidia-smi`
+      reports the GPU — this play does not reboot for you.
+  when: not (user_space | bool) and ubuntu_gpu_driver == "nvidia-ubuntu-drivers"
+
+# ---------------------------------------------------------------------------
+# 4. Shell + PATH — user shell is always bash, never zsh; ~/.local/bin on PATH
+# ---------------------------------------------------------------------------
+- name: User shell is bash (never zsh)
+  ansible.builtin.user:
+    name: "{{ constellation_user }}"
+    shell: /bin/bash
+  become: true
+  when: not (user_space | bool)
+
+- name: "~/.local/bin on PATH via ~/.bashrc"
+  ansible.builtin.blockinfile:
+    path: "{{ ansible_env.HOME }}/.bashrc"
+    marker: "# {mark} constellation ~/.local/bin PATH"
+    block: |
+      export PATH="$HOME/.local/bin:$PATH"
+    create: true
+  become: false
+
+# ---------------------------------------------------------------------------
+# 5. Common "latest release" installers
+# ---------------------------------------------------------------------------
+- name: Ollama (official installer, idempotent-ish)
+  ansible.builtin.shell: command -v ollama || (curl -fsSL https://ollama.com/install.sh | sh)
+  args: {creates: /usr/local/bin/ollama}
+  become: true
+  when: not (user_space | bool) and ubuntu_install_ollama | bool
+
+- name: nats-server (latest deb)
+  ansible.builtin.shell: |
+    set -e; command -v nats-server && exit 0
+    url=$(curl -fsSL https://api.github.com/repos/nats-io/nats-server/releases/latest | jq -r '.assets[].browser_download_url' | grep 'amd64.deb$' | head -1)
+    curl -fsSL -o /tmp/nats.deb "$url" && apt-get install -y /tmp/nats.deb
+  args: {creates: /usr/bin/nats-server}
+  become: true
+  when: not (user_space | bool) and ubuntu_install_nats_server | bool
+
+# ---------------------------------------------------------------------------
+# 6. Host-specific one-off installers (Slack/Obsidian/Handy/... — carbon-only)
+#    Runs as the constellation user, not root: `gh release download` needs the
+#    user's own gh auth. Scripts that need root for the final `apt install`
+#    embed `sudo` themselves, riding the NOPASSWD drop-in from task 1 — same
+#    idiom as the original carbon-ubuntu.yml.
+# ---------------------------------------------------------------------------
+- name: Extra host-specific installers (host_vars-defined)
+  ansible.builtin.shell: "{{ item.script }}"
+  args: {creates: "{{ item.creates }}"}
+  loop: "{{ ubuntu_extra_installers }}"
+  loop_control: {label: "{{ item.name }}"}
+  become: false
+  when: not (user_space | bool)

@@ -15,3 +15,20 @@ tailscale_tags: "tag:fleet,tag:desktop"
 # ---------------------------------------------------------------------------
 voice_node: false
 gpu: nvidia-rtx-3080
+
+# ---------------------------------------------------------------------------
+# Ubuntu join (constellation-ubuntu-join, 2026-09-05) — divergence from
+# ubuntu-base/fleet-member's shared defaults. Fresh install, not a
+# rebuild-from-backup like carbon: local-gpu brain (ollama LLM serving) +
+# native build node, no desktop/voice/i3 apps (see the superseded
+# redbaron-ubuntu.yml for the reasoning this replaces).
+# ---------------------------------------------------------------------------
+tailscale_role: desktop
+
+node_roles: ["brain", "build"]
+
+ubuntu_gpu_driver: nvidia-ubuntu-drivers
+ubuntu_extra_packages:
+  # NVIDIA driver discovery/install tool (required by ubuntu-base's
+  # `ubuntu-drivers install` task above)
+  - ubuntu-drivers-common

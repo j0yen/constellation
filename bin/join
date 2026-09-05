@@ -1,0 +1,250 @@
+#!/usr/bin/env bash
+# join — take a fresh, ssh-reachable Ubuntu 24.04+ box from inventory to fleet
+# node with one command. Wraps `ansible-playbook site-ubuntu.yml --limit
+# <hostname>`, adding: inventory validation, an ssh/tailnet preflight (so a
+# missing host or an unenrolled node fails loudly *before* any task runs), and
+# a fleet-joins.log entry on a completed (non-check) join.
+#
+# SIGPIPE safety: trap SIGPIPE so `bin/join --list | head` never aborts.
+trap '' PIPE
+
+set -uo pipefail
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+ANSIBLE_DIR="${REPO_ROOT}/ansible"
+INVENTORY_FILE="${ANSIBLE_DIR}/inventory/hosts"
+PLAYBOOK="site-ubuntu.yml"
+JOIN_LOG="${JOIN_LOG:-${HOME}/Documents/PRDs/notes/fleet-joins.log}"
+
+# ---------------------------------------------------------------------------
+usage() {
+    cat <<'EOF'
+join — converge a fresh Ubuntu 24.04+ inventory host into a fleet node.
+
+USAGE:
+  bin/join <hostname> [--check] [--user-space] [--ask-become-pass]
+  bin/join --list
+  bin/join --help
+
+ARGS:
+  <hostname>          Must already be a line in ansible/inventory/hosts under
+                       the [ubuntu] group, with ansible_host + ansible_user.
+
+FLAGS:
+  --check             Ansible check mode (dry-run) — no changes are made.
+  --user-space        Gate every become:true task to skipped-with-reason.
+                       For nodes (e.g. ryzen7) that only ever get user-level
+                       changes: dotfiles, toolchain, fleet-sync, node.toml.
+  --ask-become-pass   Pass -K through to ansible-playbook, prompting once for
+                       the sudo password. Only needed for the very first join
+                       of a box where passwordless sudo isn't already working
+                       (see the sudo-rs NOPASSWD drop-in comment in
+                       ansible/roles/ubuntu-base/tasks/main.yml) — every later
+                       join rides that drop-in and needs no password.
+  --list              Print every [ubuntu] inventory host with its last
+                       recorded join date + changed-task count (from
+                       ~/Documents/PRDs/notes/fleet-joins.log), or "unknown"
+                       if it has never been joined from this machine.
+  --help, -h          Show this message.
+
+EXIT CODES:
+  0   Join (or --check / --list) completed successfully.
+  1   Usage error, or the hostname is not in the [ubuntu] inventory group.
+  2   Host is in inventory but not reachable over ssh (see the preflight
+      hint printed — usually "enroll it in the tailnet first").
+  3+  ansible-playbook's own exit code, passed through unchanged.
+
+EXAMPLES:
+  bin/join blackbird --check      # dry-run a brand-new node first
+  bin/join blackbird              # then actually converge it
+  bin/join carbon --check         # should report zero changes (converged)
+  bin/join ryzen7 --user-space    # user-level-only node
+EOF
+}
+
+err() { echo "join: $*" >&2; }
+
+# ---------------------------------------------------------------------------
+# --list
+# ---------------------------------------------------------------------------
+run_list() {
+    local hosts=()
+    while IFS= read -r h; do
+        [[ -n "$h" ]] && hosts+=("$h")
+    done < <(inventory_ubuntu_hosts)
+
+    if [[ ${#hosts[@]} -eq 0 ]]; then
+        echo "No hosts in the [ubuntu] inventory group."
+        return 0
+    fi
+
+    printf "%-16s %-25s %s\n" "HOST" "LAST_JOIN" "CHANGED"
+    local h
+    for h in "${hosts[@]}"; do
+        local last=""
+        if [[ -f "$JOIN_LOG" ]]; then
+            last=$(grep -E "^${h}[[:space:]]" "$JOIN_LOG" 2>/dev/null | tail -1)
+        fi
+        if [[ -n "$last" ]]; then
+            local date changed
+            date=$(awk '{print $2}' <<<"$last")
+            changed=$(awk '{print $3}' <<<"$last" | cut -d= -f2)
+            printf "%-16s %-25s %s\n" "$h" "$date" "$changed"
+        else
+            printf "%-16s %-25s %s\n" "$h" "unknown" "unknown"
+        fi
+    done
+}
+
+# Print every hostname (first field) in the [ubuntu] inventory block.
+inventory_ubuntu_hosts() {
+    awk '
+        /^\[ubuntu\]/ || /^\[ubuntu:/ { in_block=1; next }
+        /^\[/ { in_block=0 }
+        in_block && NF && $0 !~ /^#/ { print $1 }
+    ' "$INVENTORY_FILE"
+}
+
+# Print the raw inventory line for a hostname if it is in the [ubuntu] block.
+inventory_line_for() {
+    local target="$1"
+    awk -v h="$target" '
+        /^\[ubuntu\]/ || /^\[ubuntu:/ { in_block=1; next }
+        /^\[/ { in_block=0 }
+        in_block && $1 == h { print; found=1 }
+        END { exit !found }
+    ' "$INVENTORY_FILE"
+}
+
+field_from_line() {
+    # field_from_line <line> <key>
+    grep -oE "$2=[^ ]+" <<<"$1" | head -1 | cut -d= -f2-
+}
+
+# ---------------------------------------------------------------------------
+# Argument parsing
+# ---------------------------------------------------------------------------
+HOSTNAME_ARG=""
+DO_CHECK=0
+DO_USER_SPACE=0
+DO_ASK_BECOME_PASS=0
+DO_LIST=0
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --list) DO_LIST=1; shift ;;
+        --check) DO_CHECK=1; shift ;;
+        --user-space) DO_USER_SPACE=1; shift ;;
+        --ask-become-pass) DO_ASK_BECOME_PASS=1; shift ;;
+        --help|-h) usage; exit 0 ;;
+        -*)
+            err "unknown flag: $1"
+            usage >&2
+            exit 1
+            ;;
+        *)
+            if [[ -n "$HOSTNAME_ARG" ]]; then
+                err "unexpected extra argument: $1"
+                exit 1
+            fi
+            HOSTNAME_ARG="$1"
+            shift
+            ;;
+    esac
+done
+
+if [[ "$DO_LIST" -eq 1 ]]; then
+    run_list
+    exit 0
+fi
+
+if [[ -z "$HOSTNAME_ARG" ]]; then
+    err "missing <hostname>"
+    usage >&2
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# 1. Inventory validation — fail before any ssh attempt (AC5)
+# ---------------------------------------------------------------------------
+if ! LINE=$(inventory_line_for "$HOSTNAME_ARG"); then
+    err "'$HOSTNAME_ARG' is not in the [ubuntu] group of $INVENTORY_FILE"
+    cat >&2 <<EOF
+
+Add a line like this under [ubuntu] in $INVENTORY_FILE, then re-run:
+
+  $HOSTNAME_ARG  ansible_host=<lan-ip-or-tailscale-name>  ansible_user=jsy
+
+...and a matching ansible/host_vars/$HOSTNAME_ARG.yml (copy
+ansible/host_vars/carbon.yml or redbaron.yml as a starting point).
+EOF
+    exit 1
+fi
+
+ANSIBLE_HOST=$(field_from_line "$LINE" ansible_host)
+ANSIBLE_USER=$(field_from_line "$LINE" ansible_user)
+
+if [[ -z "$ANSIBLE_HOST" || -z "$ANSIBLE_USER" ]]; then
+    err "inventory line for '$HOSTNAME_ARG' is missing ansible_host or ansible_user:"
+    err "  $LINE"
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# 2. Tailnet/ssh preflight — resolve + connect before any task runs (P1)
+# ---------------------------------------------------------------------------
+if ! ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new \
+        "${ANSIBLE_USER}@${ANSIBLE_HOST}" true 2>/tmp/join-ssh-check.$$ ; then
+    ssh_err=$(cat /tmp/join-ssh-check.$$ 2>/dev/null || true)
+    rm -f /tmp/join-ssh-check.$$
+
+    err "cannot reach ${ANSIBLE_USER}@${ANSIBLE_HOST} over ssh — nothing has been touched."
+    cat >&2 <<EOF
+
+  $ssh_err
+
+If $HOSTNAME_ARG is not yet on the tailnet, enroll it manually first (see
+mesh/roles/tailscale and the non-goal on unattended key minting — this step
+may need Joe's browser auth once per node):
+
+  ssh <fresh-box-lan-ip> 'curl -fsSL https://tailscale.com/install.sh | sh && \\
+      sudo tailscale up --advertise-tags=tag:fleet,tag:${HOSTNAME_ARG}'
+
+Then confirm the MagicDNS hostname resolves ("tailscale status" on either
+side) and re-run: bin/join $HOSTNAME_ARG
+EOF
+    exit 2
+fi
+rm -f /tmp/join-ssh-check.$$
+
+# ---------------------------------------------------------------------------
+# 3. Run the play
+# ---------------------------------------------------------------------------
+cmd=(ansible-playbook "$PLAYBOOK" --limit "$HOSTNAME_ARG")
+[[ "$DO_CHECK" -eq 1 ]] && cmd+=(--check)
+[[ "$DO_USER_SPACE" -eq 1 ]] && cmd+=(-e user_space=true)
+[[ "$DO_ASK_BECOME_PASS" -eq 1 ]] && cmd+=(-K)
+
+echo "join: ${cmd[*]}  (in $ANSIBLE_DIR)"
+
+OUT_FILE="$(mktemp)"
+( cd "$ANSIBLE_DIR" && "${cmd[@]}" ) 2>&1 | tee "$OUT_FILE"
+rc=${PIPESTATUS[0]}
+
+# ---------------------------------------------------------------------------
+# 4. fleet-joins.log — one line per completed, non-check join (P1)
+# ---------------------------------------------------------------------------
+if [[ "$rc" -eq 0 && "$DO_CHECK" -eq 0 ]]; then
+    changed=$(grep -E "^${HOSTNAME_ARG}[[:space:]]" "$OUT_FILE" | grep -oE 'changed=[0-9]+' | head -1 | cut -d= -f2)
+    changed="${changed:-0}"
+    mkdir -p "$(dirname "$JOIN_LOG")"
+    printf '%s %s changed=%s\n' "$HOSTNAME_ARG" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$changed" >> "$JOIN_LOG"
+    echo "join: recorded to $JOIN_LOG"
+fi
+
+rm -f "$OUT_FILE"
+exit "$rc"

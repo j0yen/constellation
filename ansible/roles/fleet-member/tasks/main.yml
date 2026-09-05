@@ -1,0 +1,137 @@
+---
+# fleet-member role tasks — user-space toolchain + fleet identity.
+# Pairs with ubuntu-base ("become a normal Ubuntu box") to make this node
+# "become a wintermute fleet node": dotfiles, ~/.local/bin toolchain,
+# fleet-sync bootstrap, node identity, systemd user units.
+#
+# Almost everything here is become:false by design — the --user-space gate
+# (ubuntu-base's `user_space` fact) only needs to skip become:true tasks, and
+# a user-space-only node (ryzen7) should still get its dotfiles/toolchain/
+# fleet-sync/node identity even though it never gets sudo-level changes.
+
+# ---------------------------------------------------------------------------
+# 1. Rust toolchain — every node builds natively, never rsynced.
+# ---------------------------------------------------------------------------
+- name: Rustup + default stable toolchain
+  ansible.builtin.shell: |
+    set -e
+    command -v rustup || curl -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+  args: {creates: "{{ ansible_env.HOME }}/.cargo/bin/rustup"}
+  become: false
+
+- name: Npm global prefix (avoid sudo npm)
+  ansible.builtin.shell: mkdir -p ~/.npm-global && npm config set prefix ~/.npm-global
+  args: {creates: "{{ ansible_env.HOME }}/.npm-global"}
+  become: false
+
+- name: "Claude Code: manual step (not scripted — npm-global install drifts silently)"
+  ansible.builtin.debug:
+    msg: >-
+      Claude Code is a manual install on this node: with ~/.npm-global/bin on
+      PATH, run `npm install -g @anthropic-ai/claude-code`, then
+      `claude --version` to confirm.
+  become: false
+
+- name: Pipx tools
+  ansible.builtin.command: pipx install {{ item }}
+  args: {creates: "{{ ansible_env.HOME }}/.local/share/pipx/venvs/{{ item }}"}
+  loop: [ansible-lint, httpie, ruff, uv]
+  become: false
+
+# ---------------------------------------------------------------------------
+# 2. Dotfiles — chezmoi is the single source of truth; join never writes
+#    dotfiles directly (see repo README "Appearance (dotfiles)").
+# ---------------------------------------------------------------------------
+- name: Chezmoi installed
+  ansible.builtin.shell: command -v chezmoi || sh -c "$(curl -fsLS get.chezmoi.io)" -- -b ~/.local/bin
+  args: {creates: "{{ ansible_env.HOME }}/.local/bin/chezmoi"}
+  become: false
+
+- name: Clone the constellation repo (source of the chezmoi tree)
+  ansible.builtin.git:
+    repo: "{{ constellation_repo }}"
+    dest: "{{ constellation_repo_dir }}"
+    update: false
+  become: false
+
+- name: chezmoi apply (idempotent — safe to re-run)
+  ansible.builtin.command: >-
+    {{ ansible_env.HOME }}/.local/bin/chezmoi apply
+    --source {{ constellation_repo_dir }}/chezmoi
+  register: chezmoi_apply
+  changed_when: "'No changes' not in (chezmoi_apply.stdout | default(''))"
+  become: false
+
+# ---------------------------------------------------------------------------
+# 3. fleet-sync bootstrap (canonical skill sources — see wintermute/fleet-sync)
+# ---------------------------------------------------------------------------
+- name: Clone fleet-sync
+  ansible.builtin.git:
+    repo: "{{ fleet_sync_repo }}"
+    dest: "{{ fleet_sync_dir }}"
+    update: false
+  become: false
+
+- name: "fleet-sync install (~/.local/bin symlink + hourly timer)"
+  ansible.builtin.command: "{{ fleet_sync_dir }}/fleet-sync install"
+  become: false
+
+- name: fleet-sync apply (first convergence)
+  ansible.builtin.command: "{{ fleet_sync_dir }}/fleet-sync apply"
+  register: fleet_sync_apply
+  changed_when: "'ok' not in (fleet_sync_apply.stdout | lower)"
+  # Best-effort: a brand-new node with no fleet.json entry yet is not a join
+  # failure — fleet.json gets an entry added by hand, same as the inventory.
+  failed_when: false
+  become: false
+
+# ---------------------------------------------------------------------------
+# 4. Node identity — ~/.config/wintermute/node.toml from host_vars
+# ---------------------------------------------------------------------------
+- name: "~/.config/wintermute directory"
+  ansible.builtin.file:
+    path: "{{ ansible_env.HOME }}/.config/wintermute"
+    state: directory
+    mode: "0755"
+  become: false
+
+- name: Write node.toml from host_vars (name, roles, fleet)
+  ansible.builtin.copy:
+    content: |
+      name = "{{ inventory_hostname }}"
+      roles = {{ node_roles | to_json }}
+      fleet = "{{ node_fleet }}"
+    dest: "{{ ansible_env.HOME }}/.config/wintermute/node.toml"
+  become: false
+
+# ---------------------------------------------------------------------------
+# 5. systemd user units + lingering
+# ---------------------------------------------------------------------------
+- name: Enable user lingering (daemons run without login)
+  ansible.builtin.command: loginctl enable-linger {{ constellation_user }}
+  args: {creates: "/var/lib/systemd/linger/{{ constellation_user }}"}
+  become: true
+  when: not (user_space | bool)
+
+- name: "user-space mode: lingering skipped (system-level, requires become)"
+  ansible.builtin.debug:
+    msg: "--user-space: system-level lingering task skipped by design."
+  when: user_space | bool
+
+- name: Check host-declared systemd user units exist before enabling
+  ansible.builtin.stat:
+    path: "{{ ansible_env.HOME }}/.config/systemd/user/{{ item }}"
+  loop: "{{ node_systemd_user_units }}"
+  register: _unit_stat
+  become: false
+
+- name: Enable declared systemd user units that are present
+  ansible.builtin.systemd:
+    scope: user
+    daemon_reload: true
+    name: "{{ item.item }}"
+    enabled: true
+  loop: "{{ _unit_stat.results }}"
+  loop_control: {label: "{{ item.item }}"}
+  when: item.stat.exists
+  become: false

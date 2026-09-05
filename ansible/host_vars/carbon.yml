@@ -1,0 +1,108 @@
+---
+# host_vars/carbon.yml — Joe's laptop (Ubuntu, since the 2026-08-23 Arch exit).
+#
+# This node hosts the voice stack + i3 desktop daily driver. Divergence from
+# ubuntu-base/fleet-member's shared defaults below is everything that used to
+# be hardcoded in the superseded carbon-ubuntu.yml (kept as a deprecation
+# pointer — see that file for the original 2026-08-23 Arch-exit rebuild notes,
+# which were carbon-only one-time recovery and are not part of the general
+# join contract this role set encodes for future nodes).
+
+# ---------------------------------------------------------------------------
+# Identity
+# ---------------------------------------------------------------------------
+tailscale_role: laptop
+voice_node: true
+gpu: intel
+
+node_roles: ["voice"]
+
+node_systemd_user_units:
+  - nats-leaf.service
+  - summa-commit.timer
+  # NOTE: agorabus/recalld/wmd/wm-tether/wintermute.target stay disabled until
+  # their binaries are rebuilt via /cloudbuild — enable per-daemon as they land.
+
+# ---------------------------------------------------------------------------
+# Apt keyrings/repos — carbon adds google-chrome on top of ubuntu-base's
+# shared github-cli + nodesource set.
+# ---------------------------------------------------------------------------
+ubuntu_extra_apt_keyrings:
+  - {name: google-chrome, ext: asc, url: "https://dl.google.com/linux/linux_signing_key.pub"}
+
+ubuntu_extra_apt_repos:
+  - "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main"
+
+# ---------------------------------------------------------------------------
+# Packages — carbon's daily-driver desktop stack, on top of ubuntu-base's
+# shared toolchain/shell baseline.
+# ---------------------------------------------------------------------------
+ubuntu_extra_packages:
+  # shell / cli extras
+  - zsh
+  - strace
+  - bpftrace
+  - linux-tools-common
+  - pahole
+  - imagemagick
+  - pandoc
+  - man-db
+  # i3 desktop stack (Ubuntu keeps GNOME/gdm3 as default; i3 is a session option)
+  - i3
+  - i3blocks
+  - i3lock
+  - i3status
+  - polybar
+  - rofi
+  - picom
+  - dunst
+  - feh
+  - autorandr
+  - xterm
+  - xss-lock
+  - x11-xserver-utils
+  - brightnessctl
+  - playerctl
+  - pavucontrol
+  - pasystray
+  - blueman
+  # audio (pipewire is Ubuntu 24.04 default)
+  - pipewire
+  - pipewire-pulse
+  - wireplumber
+  # laptop
+  - tlp
+  - smartmontools
+  # tex
+  - texlive-latex-recommended
+  - texlive-latex-extra
+  - texlive-xetex
+  - texlive-fonts-recommended
+  # browsers / apps
+  - google-chrome-stable
+  - epiphany-browser
+
+# ---------------------------------------------------------------------------
+# One-off installers that don't fit a static apt package list (idempotent via
+# `creates:`, matching the original carbon-ubuntu.yml idiom).
+# ---------------------------------------------------------------------------
+ubuntu_extra_installers:
+  - name: slack
+    creates: /usr/bin/slack
+    script: |
+      set -e; command -v slack && exit 0
+      url=$(curl -fsSL https://slack.com/api/desktop.latestRelease?arch=x64&variant=deb | jq -r .downloadUrl 2>/dev/null || true)
+      [ -z "$url" ] && url="https://downloads.slack-edge.com/desktop-releases/linux/x64/4.39.95/slack-desktop-4.39.95-amd64.deb"
+      curl -fsSL -o /tmp/slack.deb "$url" && sudo apt-get install -y /tmp/slack.deb
+  - name: obsidian
+    creates: /usr/bin/obsidian
+    script: |
+      set -e; command -v obsidian && exit 0
+      url=$(curl -fsSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | jq -r '.assets[].browser_download_url' | grep 'amd64.deb$' | head -1)
+      curl -fsSL -o /tmp/obsidian.deb "$url" && sudo apt-get install -y /tmp/obsidian.deb
+  - name: handy
+    creates: /usr/bin/handy
+    script: |
+      set -e; command -v handy && exit 0
+      cd /tmp && gh release download -R cjpais/Handy -p '*amd64*.deb' -O handy.deb --clobber
+      sudo apt-get install -y /tmp/handy.deb

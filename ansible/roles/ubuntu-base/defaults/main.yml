@@ -1,0 +1,86 @@
+---
+# ubuntu-base role defaults — Ubuntu 24.04+ equivalent of the Arch `base` role.
+# Per-host divergence (extra packages, extra keyrings/repos, GPU driver, extra
+# one-off installers) lives in ansible/host_vars/<hostname>.yml and is appended
+# to these lists — never replaces them. Mirrors the Arch base role's pattern of
+# shared defaults + host_vars overrides (group_vars/all.yml + host_vars/*.yml).
+
+# Gate: when true, every become:true task in this role (and fleet-member) is
+# skipped instead of running. Set via `bin/join <host> --user-space`.
+user_space: false
+
+node_major: 22   # nodesource major version
+
+# ---------------------------------------------------------------------------
+# Apt keyrings — apt matches keyring *format* to the file extension: a binary
+# (non-armored) GPG keyring must land as .gpg, an ASCII-armored key as .asc.
+# Getting this backwards (RedBaron, 2026-09-01: carbon-ubuntu.yml saved every
+# key as .asc regardless of actual format) makes `apt update` fail on the
+# affected repo with "not a detached signature" / "no valid OpenPGP data
+# found" — a trap worth encoding as a task, not remembering. Each entry names
+# its correct `ext` for its upstream URL; host_vars appends host-specific ones
+# (e.g. carbon's google-chrome key) in the same shape.
+# ---------------------------------------------------------------------------
+ubuntu_apt_keyrings:
+  - name: github-cli
+    ext: gpg
+    url: "https://cli.github.com/packages/githubcli-archive-keyring.gpg"
+  - name: nodesource
+    ext: asc
+    url: "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"
+
+ubuntu_apt_repos:
+  - "deb [signed-by=/etc/apt/keyrings/github-cli.gpg] https://cli.github.com/packages stable main"
+  - "deb [signed-by=/etc/apt/keyrings/nodesource.asc] https://deb.nodesource.com/node_{{ node_major }}.x nodistro main"
+
+ubuntu_extra_apt_keyrings: []   # host_vars override, e.g. carbon's google-chrome key
+ubuntu_extra_apt_repos: []      # host_vars override, matching entries above
+
+# ---------------------------------------------------------------------------
+# Packages — baseline on every Ubuntu node; host_vars appends the rest
+# (carbon's i3/desktop/audio/tex stack, redbaron's ubuntu-drivers-common, ...).
+# ---------------------------------------------------------------------------
+ubuntu_base_packages:
+  - build-essential
+  - clang
+  - pkg-config
+  - git
+  - gh
+  - nodejs
+  - python3-pip
+  - pipx
+  - shellcheck
+  - tmux
+  - neovim
+  - vim
+  - fzf
+  - ripgrep
+  - fd-find
+  - bat
+  - jq
+  - bc
+  - tree
+  - htop
+  - wget
+  - curl
+  - unzip
+  - zip
+  - watchman
+  - docker.io
+  - docker-compose-v2
+  - alacritty   # fleet-standard terminal (carbon parity)
+
+ubuntu_extra_packages: []
+
+# GPU driver install: "none" | "nvidia-ubuntu-drivers"
+ubuntu_gpu_driver: "none"
+
+# Common "latest GitHub/vendor release" installers shared by every node.
+# Set to false in host_vars to skip on a given host.
+ubuntu_install_ollama: true
+ubuntu_install_nats_server: true
+
+# Host-specific one-off installers (Slack/Obsidian/Handy/...) that don't fit a
+# static apt package list. Each item: {name, creates, script}. Empty by
+# default; carbon's host_vars populates this.
+ubuntu_extra_installers: []

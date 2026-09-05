@@ -1,0 +1,20 @@
+---
+# fleet-member role defaults — fleet identity + user-space toolchain.
+# Per-host identity (node_roles, systemd units already shipped by dotfiles)
+# lives in ansible/host_vars/<hostname>.yml.
+
+user_space: false   # shared gate; see ubuntu-base/defaults/main.yml
+
+node_fleet: wintermute
+node_roles: []
+
+fleet_sync_repo: "https://github.com/j0yen/fleet-sync.git"
+fleet_sync_dir: "{{ ansible_env.HOME }}/wintermute/fleet-sync"
+
+constellation_repo: "https://github.com/j0yen/constellation.git"
+constellation_repo_dir: "{{ ansible_env.HOME }}/wintermute/constellation"
+
+# Unit names already shipped into ~/.config/systemd/user by dotfiles/fleet-sync
+# on this host; only enabled if the unit file is actually present (a fresh
+# node before its first fleet-sync apply legitimately has none yet).
+node_systemd_user_units: []

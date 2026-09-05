@@ -28,3 +28,16 @@ redbaron  ansible_host=redbaron  ansible_user=jsy
 laptop
 desktop
 cloud
+
+# Ubuntu fleet-join targets (constellation-ubuntu-join, 2026-09-05).
+# `bin/join <hostname>` wraps ansible-playbook site-ubuntu.yml --limit
+# <hostname> against hosts in this group. Add a line here + a matching
+# ansible/host_vars/<hostname>.yml, same as the [laptop]/[desktop]/[cloud]
+# groups above.
+#
+# Example:
+#   [ubuntu]
+#   blackbird  ansible_host=192.168.1.50  ansible_user=jsy
+[ubuntu]
+carbon    ansible_host=carbon    ansible_user=jsy
+redbaron  ansible_host=redbaron  ansible_user=jsy

@@ -1,187 +1,33 @@
 ---
-# redbaron-ubuntu.yml — standalone Ubuntu bootstrap for redbaron (i7 tower, RTX 3080).
+# redbaron-ubuntu.yml — DEPRECATED, superseded by site-ubuntu.yml + bin/join
+# (constellation-ubuntu-join, 2026-09-05).
 #
-# redbaron is a fresh install, not a rebuild-from-backup like carbon-ubuntu.yml — there
-# is no state tarball to restore here. Fleet role (host_vars/redbaron.yml): local-gpu
-# brain (ollama LLM serving) + native build node. The constellation builds Rust natively
-# on every node and never rsyncs binaries between them, hence rustup below.
+# This file's ad-hoc system/user layer tasks (apt keyrings/repos with format-
+# by-extension handling, NVIDIA driver, ollama/nats-server installers,
+# rustup/npm/pipx toolchain, dotfiles clone) are now generalized as:
+#   ansible/roles/ubuntu-base/     — OS packages, sudo, apt keyrings, shell/PATH
+#   ansible/roles/fleet-member/    — dotfiles (chezmoi, not the raw git-clone +
+#                                    install.sh this file used), toolchain,
+#                                    fleet-sync, node.toml
+#   ansible/host_vars/redbaron.yml — redbaron's GPU driver + package list
 #
-# Modeled on carbon-ubuntu.yml's structure (system layer / user layer, same idioms:
-# `creates:` guards, `command -v x || install x` shell idempotency). Read that file
-# alongside this one for the pattern being followed.
+# The apt-keyring-format-by-extension fix this file introduced (916dd2e) and
+# the redbaron target-over-ssh fix (941cd29) are both preserved as explicit,
+# commented tasks in ubuntu-base/tasks/main.yml rather than left to memory.
 #
-# The shared site.yml roles (roles/base, roles/desktop, roles/voice, roles/secrets) are
-# Arch/pacman-only and are NOT used or touched by this playbook.
-#
-# PRE-STEPS (manual, once, on the fresh install):
-#   1. Install Ubuntu, user `jsy`, hostname `redbaron`.
-#   2. sudo apt update && sudo apt install -y ansible git curl openssh-client
-#   3. Enroll in the tailnet manually (in progress as of 2026-09-01):
-#        curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up
-#      Confirm the MagicDNS hostname resolves before deploying anything mesh-dependent.
-#      (carbon-ubuntu.yml documents this same manual step but has no Tailscale ansible
-#      tasks of its own, so none are added here either.)
-#   4. Run this play:
-#        ansible-playbook redbaron-ubuntu.yml -K
-#
-# NOT done by this play (deliberate):
-#   - Voice/audio/stt/tts stack — redbaron is voice_node: false. No wm-* voice daemons,
-#     no dictation (Handy), no pipewire/audio packages, unlike carbon-ubuntu.yml.
-#   - i3/desktop session, browsers (Chrome/Epiphany), Slack, Obsidian, texlive — these
-#     are Joe's daily-driver laptop apps in carbon-ubuntu.yml. redbaron's stated role is
-#     a build+inference tower, not a desktop replacement; add these back by hand if that
-#     changes.
-#   - tlp, brightnessctl — laptop power/backlight tools that don't apply to a tower.
-#   - State-tarball restore, SECRETS unpack, carbon-repos.txt WIP-repo loop, gh token
-#     import — all specific to carbon's 2026-08-23 Arch-exit backup. redbaron has no such
-#     backup; secrets (GitHub auth, hetzner/pass, etc.) need separate manual setup.
-#   - A separate cuda-toolkit package — ollama's official installer bundles its own CUDA
-#     runtime, so a standalone toolkit install is not required for inference.
-#   - Forcing a reboot after the NVIDIA driver install — carbon-ubuntu.yml never reboots
-#     either; the driver task below just flags that one is needed before the GPU is live.
+# Run instead:
+#   bin/join redbaron
+#   bin/join redbaron --check
 
-- name: Redbaron Ubuntu bootstrap — system layer
-  hosts: redbaron
-  become: true
-  tags: [system]
-  vars:
-    node_major: 22
+- name: DEPRECATED — see ansible/site-ubuntu.yml + bin/join
+  hosts: localhost
+  connection: local
+  gather_facts: false
   tasks:
-    - name: Apt keyrings dir
-      ansible.builtin.file: {path: /etc/apt/keyrings, state: directory, mode: "0755"}
-
-    - name: Third-party apt keys
-      ansible.builtin.get_url:
-        url: "{{ item.url }}"
-        dest: "/etc/apt/keyrings/{{ item.name }}.{{ item.ext }}"
-        mode: "0644"
-      loop:
-        # apt matches keyring filetype to extension: binary keyrings must be .gpg, armored .asc
-        - {name: github-cli, ext: gpg, url: "https://cli.github.com/packages/githubcli-archive-keyring.gpg"}
-        - {name: nodesource, ext: asc, url: "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"}
-
-    - name: Third-party apt repos
-      ansible.builtin.apt_repository:
-        repo: "{{ item }}"
-        state: present
-      loop:
-        - "deb [signed-by=/etc/apt/keyrings/github-cli.gpg] https://cli.github.com/packages stable main"
-        - "deb [signed-by=/etc/apt/keyrings/nodesource.asc] https://deb.nodesource.com/node_{{ node_major }}.x nodistro main"
-
-    # alacritty: fleet-standard terminal (carbon parity)
-    - name: Core packages (build + native-build-node baseline; no desktop/voice apps)
-      ansible.builtin.apt:
-        update_cache: true
-        name:
-          # fleet-standard terminal (carbon parity)
-          - alacritty
-          # toolchain / build
-          - build-essential
-          - clang
-          - pkg-config
-          - git
-          - gh
-          - nodejs
-          - python3-pip
-          - pipx
-          - shellcheck
-          # shell / cli
-          - tmux
-          - neovim
-          - vim
-          - fzf
-          - ripgrep
-          - fd-find
-          - bat
-          - jq
-          - bc
-          - tree
-          - htop
-          - wget
-          - curl
-          - unzip
-          - zip
-          - watchman
-          # containers
-          - docker.io
-          - docker-compose-v2
-          # NVIDIA driver discovery/install tool
-          - ubuntu-drivers-common
-        state: present
-
-    - name: Docker group membership
-      ansible.builtin.user: {name: jsy, groups: docker, append: true}
-
-    - name: NVIDIA driver — install the recommended driver for the RTX 3080
-      ansible.builtin.command: ubuntu-drivers install
-      register: nvidia_install
-      changed_when: "'no drivers found' not in (nvidia_install.stdout | lower)"
-      failed_when: false
-
-    - name: NVIDIA driver — reboot needed before it's active
-      ansible.builtin.debug:
+    - name: Point to the replacement
+      ansible.builtin.fail:
         msg: >-
-          `ubuntu-drivers install` has run. A reboot is required before `nvidia-smi`
-          reports the GPU — this play does not reboot for you (matching
-          carbon-ubuntu.yml's no-forced-reboot pattern). Reboot redbaron manually, then
-          verify with `nvidia-smi`.
-
-    - name: Ollama (official installer; bundles its own CUDA runtime — no separate cuda-toolkit needed)
-      ansible.builtin.shell: command -v ollama || (curl -fsSL https://ollama.com/install.sh | sh)
-      args: {creates: /usr/local/bin/ollama}
-
-    - name: nats-server (latest deb — mesh/bus prerequisite)
-      ansible.builtin.shell: |
-        set -e; command -v nats-server && exit 0
-        url=$(curl -fsSL https://api.github.com/repos/nats-io/nats-server/releases/latest | jq -r '.assets[].browser_download_url' | grep 'amd64.deb$' | head -1)
-        curl -fsSL -o /tmp/nats.deb "$url" && apt-get install -y /tmp/nats.deb
-      args: {creates: /usr/bin/nats-server}
-
-- name: Redbaron Ubuntu bootstrap — user layer
-  hosts: redbaron
-  become: false
-  tags: [user]
-  tasks:
-    - name: Rustup, default stable toolchain (every node builds Rust natively, never rsynced)
-      ansible.builtin.shell: |
-        set -e
-        command -v rustup || curl -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-      args: {creates: "{{ ansible_env.HOME }}/.cargo/bin/rustup"}
-
-    - name: Npm global prefix (avoid sudo npm)
-      ansible.builtin.shell: |
-        mkdir -p ~/.npm-global && npm config set prefix ~/.npm-global
-      args: {creates: "{{ ansible_env.HOME }}/.npm-global"}
-
-    - name: Claude Code + npm globals
-      ansible.builtin.command: npm install -g @anthropic-ai/claude-code semver
-      args: {creates: "{{ ansible_env.HOME }}/.npm-global/bin/claude"}
-
-    - name: Pipx tools
-      ansible.builtin.command: pipx install {{ item }}
-      args: {creates: "{{ ansible_env.HOME }}/.local/share/pipx/venvs/{{ item }}"}
-      loop: [ansible-lint, httpie, ruff, uv]
-
-    - name: Clone dotfiles
-      tags: [repos]
-      ansible.builtin.git:
-        repo: "https://github.com/j0yen/dotfiles.git"
-        dest: "{{ ansible_env.HOME }}/dotfiles"
-        update: false
-
-    - name: Apply dotfiles (install.sh symlinks the home-mirror; self-idempotent, safe to re-run)
-      ansible.builtin.command: ./install.sh
-      args:
-        chdir: "{{ ansible_env.HOME }}/dotfiles"
-
-    - name: Clone wintermute repo (build node needs the source tree to build natively)
-      tags: [repos]
-      ansible.builtin.git:
-        repo: "https://github.com/j0yen/wintermute.git"
-        dest: "{{ ansible_env.HOME }}/wintermute"
-        update: false
-
-    - name: Enable user lingering (daemons run without login)
-      become: true
-      ansible.builtin.command: loginctl enable-linger jsy
-      args: {creates: /var/lib/systemd/linger/jsy}
+          redbaron-ubuntu.yml is deprecated. Run `bin/join redbaron` instead
+          (wraps `ansible-playbook site-ubuntu.yml --limit redbaron`). See
+          ansible/roles/ubuntu-base/, ansible/roles/fleet-member/, and
+          ansible/host_vars/redbaron.yml for where this playbook's logic moved.

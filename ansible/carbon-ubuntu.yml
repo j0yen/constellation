@@ -1,264 +1,34 @@
 ---
-# carbon-ubuntu.yml — rebuild carbon (this laptop) on Ubuntu 24.04+ after the Arch exit.
+# carbon-ubuntu.yml — DEPRECATED, superseded by site-ubuntu.yml + bin/join
+# (constellation-ubuntu-join, 2026-09-05).
 #
-# Restores the dev environment saved 2026-08-23 to hub:~/backups/carbon-arch-exit/
-# (state-20260823.tgz, SECRETS-20260823.tgz, package manifests) and the
-# arch-exit-wip branches pushed to every dirty repo.
+# This file did carbon's one-time 2026-08-23 Arch-exit rebuild: restoring the
+# dev environment from hub:~/backups/carbon-arch-exit/ (state tarball, SECRETS
+# tarball, package manifests, WIP repo branches). That restore was a one-time
+# recovery, not part of the general "join a fresh Ubuntu box" contract — it is
+# NOT migrated into the shared role set, and is not needed again now that
+# carbon is converged. Kept here (not deleted) so this filename still gives a
+# clear pointer instead of a missing-file error, and so this migration's git
+# history stays attached to a live file. The original task list (packages,
+# apt keyrings/repos, docker, ollama/slack/obsidian/nats-server installers,
+# rustup/npm/pipx toolchain, systemd units) now lives generalized in:
+#   ansible/roles/ubuntu-base/    — OS packages, sudo, apt keyrings, shell/PATH
+#   ansible/roles/fleet-member/   — dotfiles, toolchain, fleet-sync, node.toml
+#   ansible/host_vars/carbon.yml  — carbon's specific package/keyring/installer list
 #
-# PRE-STEPS (manual, once, on the fresh install):
-#   1. Install Ubuntu, user `jsy`, hostname `carbon`.
-#   2. sudo apt update && sudo apt install -y ansible git curl openssh-client
-#   3. curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up
-#   4. Hub runs Tailscale SSH (enabled 2026-08-24) — no key needed, just click
-#      the check link once:   ssh jsy@hub
-#      Then pull + restore secrets FIRST (they unlock GitHub/acli/hetzner):
-#        mkdir ~/restore && scp 'hub:backups/carbon-arch-exit/*' ~/restore/
-#        tar xzf ~/restore/SECRETS-20260823.tgz -C ~ && chmod 700 ~/.ssh && chmod 600 ~/.ssh/*
-#        tar xzf ~/restore/SECRETS2-20260824.tgz -C ~   # gnome keyrings, gh tokens, GH recovery codes
-#      gh kept its tokens in the keyring, so log in from the exported files:
-#        gh auth login --with-token < ~/.gh-tokens/j0yen
-#        gh auth login --with-token < ~/.gh-tokens/joeyen-atscale   # becomes active; switch with gh auth switch
-#      Personal files: tar xzf ~/restore/personal-20260824.tgz -C ~  (Documents/Downloads/Notes)
-#   5. Run this play (see tags at bottom):
-#        ansible-playbook carbon-ubuntu.yml -K
-#
-# NOT restored by this play (deliberate):
-#   - linux-wintermute custom kernel  -> patches are in the umbrella repo; stay mainline first
-#   - ~/.local/bin (293 Rust CLIs)    -> rebuild via /cloudbuild per repo as needed
-#   - cargo targets / venvs / models  -> rebuildable caches
+# Run instead:
+#   bin/join carbon
+#   bin/join carbon --check   # dry-run; should report zero changes (converged)
 
-- name: Carbon Ubuntu rebuild — system layer
+- name: DEPRECATED — see ansible/site-ubuntu.yml + bin/join
   hosts: localhost
   connection: local
-  become: true
-  tags: [system]
-  vars:
-    node_major: 22
+  gather_facts: false
   tasks:
-    - name: Apt keyrings dir
-      ansible.builtin.file: {path: /etc/apt/keyrings, state: directory, mode: "0755"}
-
-    - name: Third-party apt keys
-      ansible.builtin.get_url:
-        url: "{{ item.url }}"
-        dest: "/etc/apt/keyrings/{{ item.name }}.asc"
-        mode: "0644"
-      loop:
-        - {name: github-cli, url: "https://cli.github.com/packages/githubcli-archive-keyring.gpg"}
-        - {name: google-chrome, url: "https://dl.google.com/linux/linux_signing_key.pub"}
-        - {name: nodesource, url: "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"}
-
-    - name: Third-party apt repos
-      ansible.builtin.apt_repository:
-        repo: "{{ item }}"
-        state: present
-      loop:
-        - "deb [signed-by=/etc/apt/keyrings/github-cli.asc] https://cli.github.com/packages stable main"
-        - "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main"
-        - "deb [signed-by=/etc/apt/keyrings/nodesource.asc] https://deb.nodesource.com/node_{{ node_major }}.x nodistro main"
-
-    - name: Core packages (mapped from pacman-explicit.txt)
-      ansible.builtin.apt:
-        update_cache: true
-        name:
-          # toolchain / build
-          - build-essential
-          - clang
-          - pkg-config
-          - git
-          - gh
-          - nodejs
-          - python3-pip
-          - pipx
-          - shellcheck
-          - strace
-          - bpftrace
-          - linux-tools-common
-          - pahole
-          # shell / cli
-          - zsh
-          - tmux
-          - neovim
-          - vim
-          - fzf
-          - ripgrep
-          - fd-find
-          - bat
-          - jq
-          - bc
-          - tree
-          - htop
-          - wget
-          - unzip
-          - zip
-          - watchman
-          - imagemagick
-          - pandoc
-          - man-db
-          # i3 desktop stack (Ubuntu keeps GNOME/gdm3 as default; i3 is a session option)
-          - i3
-          - i3blocks
-          - i3lock
-          - i3status
-          - polybar
-          - rofi
-          - picom
-          - dunst
-          - feh
-          - autorandr
-          - alacritty
-          - xterm
-          - xss-lock
-          - x11-xserver-utils
-          - brightnessctl
-          - playerctl
-          - pavucontrol
-          - pasystray
-          - blueman
-          # audio (pipewire is Ubuntu 24.04 default)
-          - pipewire
-          - pipewire-pulse
-          - wireplumber
-          # containers
-          - docker.io
-          - docker-compose-v2
-          # laptop
-          - tlp
-          - smartmontools
-          # tex
-          - texlive-latex-recommended
-          - texlive-latex-extra
-          - texlive-xetex
-          - texlive-fonts-recommended
-          # browsers / apps
-          - google-chrome-stable
-          - epiphany-browser
-        state: present
-
-    - name: Docker group membership
-      ansible.builtin.user: {name: jsy, groups: docker, append: true}
-
-    - name: Ollama (official installer, idempotent-ish)
-      ansible.builtin.shell: command -v ollama || (curl -fsSL https://ollama.com/install.sh | sh)
-      args: {creates: /usr/local/bin/ollama}
-
-    - name: Slack (deb, not snap)
-      ansible.builtin.shell: |
-        set -e; command -v slack && exit 0
-        url=$(curl -fsSL https://slack.com/api/desktop.latestRelease?arch=x64&variant=deb | jq -r .downloadUrl 2>/dev/null || true)
-        [ -z "$url" ] && url="https://downloads.slack-edge.com/desktop-releases/linux/x64/4.39.95/slack-desktop-4.39.95-amd64.deb"
-        curl -fsSL -o /tmp/slack.deb "$url" && apt-get install -y /tmp/slack.deb
-      args: {creates: /usr/bin/slack}
-
-    - name: Obsidian (latest deb)
-      ansible.builtin.shell: |
-        set -e; command -v obsidian && exit 0
-        url=$(curl -fsSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | jq -r '.assets[].browser_download_url' | grep 'amd64.deb$' | head -1)
-        curl -fsSL -o /tmp/obsidian.deb "$url" && apt-get install -y /tmp/obsidian.deb
-      args: {creates: /usr/bin/obsidian}
-
-    - name: nats-server (latest deb)
-      ansible.builtin.shell: |
-        set -e; command -v nats-server && exit 0
-        url=$(curl -fsSL https://api.github.com/repos/nats-io/nats-server/releases/latest | jq -r '.assets[].browser_download_url' | grep 'amd64.deb$' | head -1)
-        curl -fsSL -o /tmp/nats.deb "$url" && apt-get install -y /tmp/nats.deb
-      args: {creates: /usr/bin/nats-server}
-
-- name: Carbon Ubuntu rebuild — user layer
-  hosts: localhost
-  connection: local
-  become: false
-  tags: [user]
-  vars:
-    hub: hub                       # relies on ~/.ssh/config from SECRETS tarball
-    backup: backups/carbon-arch-exit
-    state_tgz: state-20260823.tgz
-  tasks:
-    - name: Sanity — hub key restored?
-      ansible.builtin.stat: {path: "{{ ansible_env.HOME }}/.ssh/id_ed25519_hub"}
-      register: hubkey
-      failed_when: not hubkey.stat.exists
-
-    - name: Pull state tarball from hub
-      tags: [restore]
-      ansible.builtin.command:
-        cmd: rsync -a {{ hub }}:{{ backup }}/{{ state_tgz }} {{ ansible_env.HOME }}/{{ state_tgz }}
-        creates: "{{ ansible_env.HOME }}/{{ state_tgz }}"
-
-    - name: Unpack state tarball into $HOME (.claude, brain, configs, wintermute extras)
-      tags: [restore]
-      ansible.builtin.unarchive:
-        src: "{{ ansible_env.HOME }}/{{ state_tgz }}"
-        dest: "{{ ansible_env.HOME }}"
-        remote_src: true
-        creates: "{{ ansible_env.HOME }}/.claude/settings.json"
-
-    - name: Rustup + both toolchains (1.85 default, 1.88)
-      ansible.builtin.shell: |
-        set -e
-        command -v rustup || (curl -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.85)
-        ~/.cargo/bin/rustup toolchain install 1.88 --profile minimal
-        ~/.cargo/bin/rustup default 1.85
-      args: {creates: "{{ ansible_env.HOME }}/.cargo/bin/rustup"}
-
-    - name: Npm global prefix (avoid sudo npm)
-      ansible.builtin.shell: |
-        mkdir -p ~/.npm-global && npm config set prefix ~/.npm-global
-      args: {creates: "{{ ansible_env.HOME }}/.npm-global"}
-
-    - name: Claude Code + npm globals
-      ansible.builtin.command: npm install -g @anthropic-ai/claude-code semver
-      args: {creates: "{{ ansible_env.HOME }}/.npm-global/bin/claude"}
-
-    - name: Pipx tools
-      ansible.builtin.command: pipx install {{ item }}
-      args: {creates: "{{ ansible_env.HOME }}/.local/share/pipx/venvs/{{ item }}"}
-      loop: [ansible-lint, httpie, ruff, uv]
-
-    - name: Clone primary repos
-      tags: [repos]
-      ansible.builtin.git:
-        repo: "https://github.com/{{ item.r }}.git"
-        dest: "{{ ansible_env.HOME }}/{{ item.d }}"
-        update: false
-      loop:
-        - {r: j0yen/dotfiles, d: dotfiles}
-        - {r: j0yen/notes, d: Notes}
-        - {r: j0yen/wintermute, d: wintermute-git}   # clone beside restored extras; merge manually
-        - {r: joeyen-atscale/atscale-prds, d: atscale-prds}
-        - {r: j0yen/recall, d: projects/recall}
-        - {r: j0yen/learning-db, d: projects/learning-db}
-
-    - name: Clone nested wintermute repos (WIP is on arch-exit-wip branches)
-      tags: [repos]
-      ansible.builtin.git:
-        repo: "https://github.com/{{ item }}.git"
-        dest: "{{ ansible_env.HOME }}/wintermute-git/{{ item | basename }}"
-        update: false
-      loop: "{{ lookup('file', 'files/carbon-repos.txt').splitlines() | reject('match', '^#') | list }}"
-
-    - name: Enable user lingering (daemons run without login)
-      become: true
-      ansible.builtin.command: loginctl enable-linger jsy
-      args: {creates: /var/lib/systemd/linger/jsy}
-
-    - name: Enable base user units (restored by the tarball into ~/.config/systemd/user)
-      tags: [units]
-      ansible.builtin.systemd:
-        scope: user
-        daemon_reload: true
-        name: "{{ item }}"
-        enabled: true
-      loop:
-        - nats-leaf.service
-        - summa-commit.timer
-      # NOTE: agorabus/recalld/wmd/wm-tether/wintermute.target stay disabled until
-      # their binaries are rebuilt via /cloudbuild — enable per-daemon as they land.
-
-    - name: Handy (deb via gh; needs gh auth from secrets)
-      ansible.builtin.shell: |
-        set -e; command -v handy && exit 0
-        cd /tmp && gh release download -R cjpais/Handy -p '*amd64*.deb' -O handy.deb --clobber
-        sudo apt-get install -y /tmp/handy.deb
-      args: {creates: /usr/bin/handy}
-      tags: [handy]
+    - name: Point to the replacement
+      ansible.builtin.fail:
+        msg: >-
+          carbon-ubuntu.yml is deprecated. Run `bin/join carbon` instead
+          (wraps `ansible-playbook site-ubuntu.yml --limit carbon`). See
+          ansible/roles/ubuntu-base/, ansible/roles/fleet-member/, and
+          ansible/host_vars/carbon.yml for where this playbook's logic moved.

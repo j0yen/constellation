@@ -2,6 +2,41 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+**constellation-ubuntu-join: a fresh Ubuntu box becomes a fleet node with one command**
+
+Joining RedBaron to the fleet (2026-09-01) was a multi-session manual effort
+reconstructed from memory each time; the two Ubuntu ports (`carbon-ubuntu.yml`,
+`redbaron-ubuntu.yml`) shared nothing and left the traps hit along the way
+(sudo-rs breaking `become` without an explicit NOPASSWD drop-in; apt keyring
+format mismatches) undocumented anywhere but session memory. This release
+folds both playbooks into one parameterized join path.
+
+- **`bin/join <hostname> [--check] [--user-space] [--ask-become-pass]`** —
+  validates the host is in the `[ubuntu]` inventory group and reachable over
+  ssh before touching anything, wraps `ansible-playbook site-ubuntu.yml
+  --limit <hostname>`, and appends one line to
+  `~/Documents/PRDs/notes/fleet-joins.log` per completed join.
+  `bin/join --list` shows every `[ubuntu]` host with its last join.
+- **`ansible/roles/ubuntu-base/` + `ansible/roles/fleet-member/`** — replace
+  the two ad-hoc per-host playbooks; per-host divergence (packages, apt
+  keyrings, GPU driver, one-off installers, node roles) moves to
+  `ansible/host_vars/<hostname>.yml`, mirroring the existing Arch role split.
+  `carbon-ubuntu.yml` / `redbaron-ubuntu.yml` are kept only as deprecation
+  pointers.
+- **Known traps encoded as tasks, not memory** — the sudo-rs NOPASSWD
+  drop-in is the first `become:true` task in `ubuntu-base` (ordering is
+  covered by `tests/ubuntu-role-check.sh`); apt keyrings are fetched with
+  their format matched to the file extension (binary → `.gpg`, armored →
+  `.asc`).
+- **`--user-space`** — gates every `become:true` task off via one shared
+  `user_space` fact (role-level, not sprinkled per task), for nodes like
+  ryzen7 that should only ever get user-level changes.
+- **Tailnet enrollment reused, not reinvented** — `site-ubuntu.yml` applies
+  the existing `mesh/roles/tailscale` role (already Debian/Ubuntu-aware)
+  rather than a second copy.
+
 ## v0.2.0 — 2026-06-05
 
 **constellation-mesh: one private network with stable names**

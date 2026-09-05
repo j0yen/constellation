@@ -10,7 +10,7 @@ Run more than one machine and they drift. The laptop gets a package the desktop 
 
 | Path | What it provisions |
 |---|---|
-| `ansible/` | The `site.yml` playbook and four roles — `base`, `desktop`, `voice`, `cloud`. |
+| `ansible/` | The `site.yml` playbook and four Arch roles — `base`, `desktop`, `voice`, `cloud` — plus `site-ubuntu.yml` and the `ubuntu-base`/`fleet-member` roles for Ubuntu nodes (see `bin/join`). |
 | `chezmoi/` | Managed dotfiles — byte-identical i3, alacritty, and i3status across nodes; per-host divergence (monitors, battery) via Go templates. |
 | `mesh/` | Tailscale enrollment — one private network, stable MagicDNS names, ACL-gated ports, health checks. |
 | `localrepo/` | Build and serve a local pacman repo for the prebuilt `linux-wintermute` kernel — one machine builds, all nodes pull. |
@@ -40,6 +40,25 @@ ansible-galaxy collection install -r ansible/requirements.yml
 cd ansible
 ansible-playbook -i inventory/hosts site.yml --check          # dry-run first
 ansible-playbook -i inventory/hosts site.yml --limit laptop   # then apply to one host
+```
+
+## Join a fresh Ubuntu node
+
+The fleet has moved to Ubuntu 24.04+; `bin/join <hostname>` takes a fresh,
+ssh-reachable box already in `ansible/inventory/hosts` (`[ubuntu]` group)
+through tailnet enrollment, user/shell setup, dotfiles, `~/.local/bin`
+toolchain, fleet-sync bootstrap, node identity, and systemd user units —
+one shared `ubuntu-base` + `fleet-member` role set (see
+`ansible/roles/ubuntu-base/`, `ansible/roles/fleet-member/`) instead of a
+per-host playbook. Known traps (sudo-rs needing an explicit NOPASSWD
+drop-in, apt keyring format matching its file extension) are encoded as
+ordered tasks, not left to memory.
+
+```sh
+bin/join blackbird --check   # dry-run a brand-new node first
+bin/join blackbird           # then converge it
+bin/join carbon --check      # already converged — reports zero changes
+bin/join --list              # every [ubuntu] host + its last join date
 ```
 
 ## Appearance (dotfiles)

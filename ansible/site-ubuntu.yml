@@ -1,0 +1,46 @@
+---
+# site-ubuntu.yml — the Ubuntu equivalent of site.yml: turn a fresh Ubuntu
+# 24.04+ box into a wintermute fleet node. Applies to `[ubuntu]` inventory
+# hosts only — Arch nodes keep using site.yml + roles/base et al., untouched.
+#
+# Prefer bin/join, which wraps this with inventory/ssh preflight and a
+# fleet-joins.log entry:
+#   bin/join <hostname>
+#   bin/join <hostname> --check          # dry-run
+#   bin/join <hostname> --user-space     # gate every become:true task off
+#
+# Direct invocation:
+#   ansible-playbook site-ubuntu.yml --limit <hostname>
+#   ansible-playbook site-ubuntu.yml --limit <hostname> --check
+#   ansible-playbook site-ubuntu.yml --limit <hostname> -e user_space=true
+#
+# Role order (see each role's comments for the reasoning):
+#   ubuntu-base   — sudo-rs NOPASSWD drop-in (must run first — see role
+#                   comment), apt baseline + keyrings (format matched to
+#                   extension), packages, shell=bash, ~/.local/bin PATH.
+#   tailscale     — tailnet enrollment. Reuses mesh/roles/tailscale (already
+#                   supports Debian/Ubuntu) rather than a second copy — see
+#                   ansible.cfg roles_path.
+#   fleet-member  — dotfiles (chezmoi), toolchain, fleet-sync bootstrap,
+#                   node.toml, systemd user units.
+
+- name: Provision Ubuntu constellation node
+  hosts: ubuntu
+  gather_facts: false
+  vars:
+    user_space: "{{ user_space | default(false) }}"
+  pre_tasks:
+    # AC9 — python3 missing on the target: raw runs over plain SSH, no python
+    # required, so this always works even on a bone-stock Ubuntu install.
+    - name: Bootstrap python3 if missing (raw — no python required on target yet)
+      ansible.builtin.raw: test -e /usr/bin/python3 || (sudo apt-get update -qq && sudo apt-get install -y python3)
+      changed_when: false
+      become: false
+
+    - name: Gather facts now that python3 is present
+      ansible.builtin.setup:
+  roles:
+    - role: ubuntu-base
+    - role: tailscale
+      when: not (user_space | bool)   # tailnet join is a system-level operation
+    - role: fleet-member
